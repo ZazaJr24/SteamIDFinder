@@ -1,0 +1,50 @@
+{
+  "name": "cubecraft-legends",
+  "private": true,
+  "version": "0.1.0",
+  "description": "A voxel sandbox game for the browser, built for CrazyGames.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "textures": "tsx tools/texgen/cli.ts",
+    "predev": "npm run textures",
+    "dev": "vite",
+    "prebuild": "npm run textures",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "pretest:e2e": "npm run build",
+    "test:e2e": "playwright test",
+    "check:size": "node scripts/check-size.mjs",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "@fontsource/pixelify-sans": "^5.3.0",
+    "fflate": "^0.8.3",
+    "simplex-noise": "^4.0.3",
+    "three": "^0.186.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "1.56.1",
+    "@types/node": "^22.20.4",
+    "@types/three": "^0.186.0",
+    "eslint": "^10.11.0",
+    "eslint-config-prettier": "^10.1.8",
+    "fake-indexeddb": "^6.2.5",
+    "globals": "^17.12.0",
+    "prettier": "^3.9.9",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.70.1",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.1"
+  }
+}
