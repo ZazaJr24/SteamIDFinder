@@ -313,6 +313,11 @@ export function buildTextureSet(): TextureSet {
   def('crafting_table_front', ({ rng, get }) => craftingSide(rng, get('oak_planks'), true));
   def('bookshelf', ({ rng, get }) => bookshelf(rng, get('oak_planks')));
 
+  // Particles.
+  def('particle_flame', () => flameSprite(['#fff8d6', '#ffd23c', '#f28a1c', '#b8420c']));
+  def('particle_glut_flame', () => flameSprite(['#ffd0c8', '#ff4a2c', '#c81e12', '#6a0e08']));
+  def('particle_smoke', ({ rng }) => smokeSprite(rng));
+
   // Block breaking cracks: 10 stages, each adding to the previous one.
   const cracks = crackStages(new Random(seedFromString('tex:cracks')), 10);
   cracks.forEach((tile, i) => def(`destroy_stage_${i}`, () => tile));
@@ -344,6 +349,36 @@ export const DYE_COLORS: Record<string, string> = {
 };
 
 // ------------------------------------------------------- one-off drawings
+
+/** Tear-drop flame, brightest at the bottom center. */
+function flameSprite(colors: string[]): Tile {
+  const t = new Tile().fill(P.CLEAR);
+  const pal = colors.map((c) => hex(c));
+  for (let y = 0; y < 16; y++)
+    for (let x = 0; x < 16; x++) {
+      const dx = (x - 7.5) / 5.5;
+      const dy = (y - 10) / 5.5;
+      // Narrower toward the top.
+      const width = dy < 0 ? 1 + dy * 0.75 : 1;
+      const r = Math.hypot(dx / Math.max(0.15, width), dy);
+      if (r > 1) continue;
+      t.set(x, y, pal[Math.min(3, Math.floor(r * 4))]!);
+    }
+  return t;
+}
+
+/** Soft gray puff. */
+function smokeSprite(rng: Random): Tile {
+  const t = new Tile().fill(P.CLEAR);
+  const pal = ramp('#8a8a8a', 4, 0.3);
+  for (let y = 0; y < 16; y++)
+    for (let x = 0; x < 16; x++) {
+      const r = Math.hypot(x - 7.5, y - 7.5) / 7;
+      if (r > 1 || (r > 0.8 && rng.chance(0.5))) continue;
+      t.set(x, y, pal[Math.min(3, Math.floor((1 - r) * 3 + rng.next()))]!);
+    }
+  return t;
+}
 
 /** Cumulative crack patterns: branching dark lines growing from the center. */
 function crackStages(rng: Random, stages: number): Tile[] {

@@ -4,7 +4,7 @@ import { GameLoop, FixedStepper } from './core/loop';
 import type { Input } from './core/input';
 import type { Settings, SettingsStore } from './core/settings';
 import { randomSeed, seedFromString } from './core/random';
-import { PHYSICS_HZ } from './config';
+import { PHYSICS_HZ, TICKS_PER_SECOND } from './config';
 import type { Platform } from './platform/crazygames';
 import { Player, type GameMode, type MoveInput } from './entity/player';
 import { BLOCKS } from './world/blocks/blocks';
@@ -19,7 +19,10 @@ import {
   type WorldStore,
 } from './world/storage/save';
 import { WorldSaver } from './world/storage/world-saver';
-import { WorldRenderer } from './render/world-renderer';
+import { TerrainMaterials, WorldRenderer } from './render/world-renderer';
+import { SkyRenderer } from './render/sky';
+import { HeldItem } from './render/hand';
+import { AmbientEffects } from './gameplay/ambient';
 import { loadBlockTextures, uploadMipmaps, type BlockTextures } from './render/textures';
 import { SelectionBox } from './render/selection';
 import { CrackOverlay, ParticleSystem } from './render/effects';
@@ -44,7 +47,6 @@ export interface GameContext {
 
 type GameState = 'menu' | 'playing' | 'paused' | 'inventory';
 
-const SKY_COLOR = new THREE.Color(0x9cc4ff);
 const WATER_FOG = new THREE.Color(0x1d3f7a);
 const AUTOSAVE_SECONDS = 30;
 /** Until survival inventory and crafting exist, new worlds default to creative. */
@@ -67,6 +69,8 @@ interface Session {
   /** The world has been written at least once (it shows in the world list). */
   persisted: boolean;
   autosave: number;
+  /** Time of day in ticks (24000 per day). */
+  time: number;
 }
 
 /** Top-level game object: owns the renderer, the loop and the screen flow. */
@@ -81,6 +85,11 @@ export class Game {
   private readonly centerLabel: HTMLElement;
   private cracks: CrackOverlay | null = null;
   private particles: ParticleSystem | null = null;
+  private materials: TerrainMaterials | null = null;
+  private hand: HeldItem | null = null;
+  private ambient: AmbientEffects | null = null;
+  private readonly sky = new SkyRenderer();
+  private readonly fogColor = new THREE.Color();
   private state: GameState = 'menu';
   /** Rebuilds the current screen, e.g. after a language change. */
   private currentScreen: (() => HTMLElement) | null = null;
@@ -100,7 +109,8 @@ export class Game {
     });
     this.renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.scene.background = SKY_COLOR.clone();
+    this.renderer.autoClear = false;
+    this.scene.add(this.sky.group);
     this.camera = new THREE.PerspectiveCamera(ctx.settings.value.fov, 1, 0.05, 1000);
     this.camera.rotation.order = 'YXZ';
     this.scene.add(this.selection.object);
@@ -143,6 +153,14 @@ export class Game {
     this.particles = new ParticleSystem(this.textures);
     this.particles.setViewportHeight(window.innerHeight);
     this.scene.add(this.cracks.object, this.particles.object);
+    this.materials = new TerrainMaterials(this.textures);
+    this.hand = new HeldItem(this.materials);
+    this.hand.setAspect(window.innerWidth / Math.max(1, window.innerHeight));
+    this.ambient = new AmbientEffects(this.particles, {
+      flame: layers['particle_flame'] ?? 0,
+      glutFlame: layers['particle_glut_flame'] ?? 0,
+      smoke: layers['particle_smoke'] ?? 0,
+    });
     const workers = defaultWorkerCount();
     this.genPool = new WorkerPool<GenRequest, GenResponse>(
       () => new Worker(new URL('./workers/gen.worker.ts', import.meta.url), { type: 'module' }),
@@ -202,7 +220,7 @@ export class Game {
     const saver = new WorldSaver(this.store, meta);
     const chunks = new ChunkManager(world, this.genPool, saver);
     chunks.radius = this.ctx.settings.value.renderDistance;
-    const renderer = new WorldRenderer(this.textures, this.meshPool);
+    const renderer = new WorldRenderer(this.materials!, this.meshPool);
     renderer.options.fastLeaves = this.ctx.settings.value.graphics === 'low';
     this.scene.add(renderer.group);
     const player = new Player();
@@ -225,6 +243,10 @@ export class Game {
       this.selection,
       this.cracks!,
       this.particles!,
+      {
+        onBreak: () => this.hand?.swingOnce(),
+        onPlace: () => this.hand?.swingOnce(),
+      },
     );
     this.session = {
       meta,
@@ -239,6 +261,7 @@ export class Game {
       spawned: false,
       persisted,
       autosave: AUTOSAVE_SECONDS,
+      time: meta.time,
       physics: new FixedStepper(PHYSICS_HZ, (dt) => this.physicsStep(dt)),
     };
     this.applySettings(this.ctx.settings.value);
@@ -271,6 +294,7 @@ export class Game {
       };
     }
     s.meta.hotbar = this.hotbar.serialize();
+    s.meta.time = Math.floor(s.time);
     s.meta.lastPlayed = Date.now();
     s.autosave = AUTOSAVE_SECONDS;
     return s.saver.flush(s.world.columns.values());
@@ -408,7 +432,7 @@ export class Game {
     const session = this.session;
     if (!session) return;
     session.chunks.radius = s.renderDistance;
-    this.camera.far = s.renderDistance * 16 + 64;
+    this.camera.far = Math.max(s.renderDistance * 16 + 64, 420);
     this.camera.updateProjectionMatrix();
     const fast = s.graphics === 'low';
     if (session.renderer.options.fastLeaves !== fast) {
@@ -427,6 +451,7 @@ export class Game {
     this.camera.aspect = w / Math.max(1, h);
     this.camera.updateProjectionMatrix();
     this.particles?.setViewportHeight(h);
+    this.hand?.setAspect(w / Math.max(1, h));
   }
 
   private onKey(code: string): void {
@@ -465,16 +490,20 @@ export class Game {
   private frame(dt: number): void {
     this.time += dt;
     const s = this.session;
+    const renderer = this.renderer;
+    renderer.clear();
     if (s) {
       if (this.state === 'playing') this.updatePlaying(s, dt);
       else if (this.state === 'menu') this.updateMenuCamera(s);
       else this.placeCamera(s, 1);
+      // The day goes on unless the game is paused.
+      if (this.state !== 'paused') s.time += dt * TICKS_PER_SECOND;
       const focus = s.player.position;
       s.chunks.update(focus.x, focus.z);
       s.renderer.update(s.world, this.camera.position);
-      s.renderer.uniforms.uTime.value = this.time;
+      this.updateAtmosphere(s);
       this.particles?.update(dt, (x, y, z) => BLOCKS.isSolid(s.world.getBlock(x, y, z)));
-      this.updateFog(s);
+      if (this.state !== 'menu') this.ambient?.update(dt, s.world, focus.x, focus.y, focus.z);
       if (this.state !== 'menu' && s.persisted) {
         s.autosave -= dt;
         if (s.autosave <= 0) void this.saveSession();
@@ -482,7 +511,16 @@ export class Game {
       this.centerLabel.textContent =
         this.state === 'playing' && !s.spawned ? t('hud.loadingWorld') : '';
     }
-    this.renderer.render(this.scene, this.camera);
+    renderer.render(this.scene, this.camera);
+    if (s && this.hand && this.state !== 'menu') {
+      const p = s.player;
+      const eye = this.camera.position;
+      const light = s.world.getLight(Math.floor(eye.x), Math.floor(eye.y), Math.floor(eye.z));
+      const speed = p.onGround ? Math.min(1, Math.hypot(p.velocity.x, p.velocity.z) / 4.3) : 0;
+      this.hand.update(dt, this.hotbar.selectedState, light, p.walkDistance, speed);
+      renderer.clearDepth();
+      renderer.render(this.hand.scene, this.hand.camera);
+    }
     this.hud.tick(dt, this.ctx.settings.value.showFps);
     this.hud.setDebug(s ? this.debugLines(s) : null);
     this.ctx.input.endFrame();
@@ -563,14 +601,27 @@ export class Game {
     }
   }
 
-  private updateFog(s: Session): void {
+  /** Sky, fog, daylight and torch flicker for the current moment. */
+  private updateAtmosphere(s: Session): void {
+    const settings = this.ctx.settings.value;
     const underwater = this.state !== 'menu' && s.player.headInWater;
-    const fog = underwater ? WATER_FOG : SKY_COLOR;
-    s.renderer.uniforms.uFogColor.value.copy(fog);
-    (this.scene.background as THREE.Color).copy(fog);
-    const far = this.ctx.settings.value.renderDistance * 16;
-    if (underwater) s.renderer.setFog(2, 24);
-    else s.renderer.setFog(far * 0.55, far * 0.95);
+    const far = settings.renderDistance * 16;
+    const sky = this.sky.update(s.time, this.camera, far, underwater, settings.graphics !== 'low');
+    const u = this.materials!.uniforms;
+    u.uTime.value = this.time;
+    u.uDaylight.value = sky.daylight;
+    u.uSkyLight.value.copy(sky.skyLight);
+    // Gentle torch flicker.
+    const flicker = 1 + Math.sin(this.time * 11.3) * 0.025 + Math.sin(this.time * 7.1 + 1.3) * 0.02;
+    u.uBlockLight.value.setRGB(1.05 * flicker, 0.88 * flicker, 0.66 * flicker);
+    if (underwater) {
+      this.fogColor.copy(WATER_FOG).multiplyScalar(0.35 + 0.65 * sky.daylight);
+      this.materials!.setFog(2, 24);
+    } else {
+      this.fogColor.copy(sky.horizon);
+      this.materials!.setFog(far * 0.55, far * 0.95);
+    }
+    u.uFogColor.value.copy(this.fogColor);
   }
 
   private debugLines(s: Session): string[] {
@@ -585,7 +636,7 @@ export class Game {
       `Draw calls ${this.renderer.info.render.calls}  Triangles ${this.renderer.info.render.triangles}`,
       `World "${s.meta.name}"  Seed ${s.world.seed}  Mode ${s.player.mode}`,
       t ? `Target ${BLOCKS.stateName(t.state)} @ ${t.x} ${t.y} ${t.z}` : 'Target -',
-      `Flying ${s.player.flying}  Water ${s.player.inWater}`,
+      `Flying ${s.player.flying}  Water ${s.player.inWater}  Time ${Math.floor(s.time % 24000)}  Day ${Math.floor(s.time / 24000) + 1}`,
     ];
   }
 

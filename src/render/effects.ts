@@ -87,17 +87,19 @@ uniform mat4 projectionMatrix;
 uniform float uScale;
 in vec3 position;
 in vec4 info; // layer, u offset, v offset, size
-in float light;
+in vec2 extra; // light, uv scale
 out float vLayer;
 out vec2 vOffset;
 out float vLight;
+out float vUvScale;
 void main() {
   vec4 view = modelViewMatrix * vec4(position, 1.0);
   gl_Position = projectionMatrix * view;
   gl_PointSize = info.w * uScale / max(0.1, -view.z);
   vLayer = info.x;
   vOffset = info.yz;
-  vLight = light;
+  vLight = extra.x;
+  vUvScale = extra.y;
 }
 `;
 
@@ -108,24 +110,47 @@ uniform sampler2DArray uTextures;
 in float vLayer;
 in vec2 vOffset;
 in float vLight;
+in float vUvScale;
 out vec4 fragColor;
 void main() {
-  vec2 uv = vOffset + gl_PointCoord * 0.25;
+  vec2 uv = vOffset + gl_PointCoord * vUvScale;
   vec4 t = texture(uTextures, vec3(uv, vLayer));
   if (t.a < 0.5) discard;
   fragColor = vec4(t.rgb * vLight, 1.0);
 }
 `;
 
-const MAX_PARTICLES = 768;
+const MAX_PARTICLES = 1024;
 
-/** Small textured squares that fly off broken blocks. */
+export interface ParticleSpec {
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+  layer: number;
+  /** World size (roughly blocks). */
+  size: number;
+  life: number;
+  brightness: number;
+  /** Downward acceleration (negative = rises). */
+  gravity: number;
+  /** Portion of the texture shown: 0.25 = a random quarter, 1 = all of it. */
+  uvScale?: number;
+  /** Stops at solid blocks. */
+  collide?: boolean;
+}
+
+/** Small textured squares: block fragments, flames, smoke. */
 export class ParticleSystem {
   readonly object: THREE.Points;
   private readonly positions = new Float32Array(MAX_PARTICLES * 3);
   private readonly info = new Float32Array(MAX_PARTICLES * 4);
-  private readonly light = new Float32Array(MAX_PARTICLES);
+  private readonly extra = new Float32Array(MAX_PARTICLES * 2);
   private readonly velocity = new Float32Array(MAX_PARTICLES * 3);
+  private readonly gravity = new Float32Array(MAX_PARTICLES);
+  private readonly collide = new Uint8Array(MAX_PARTICLES);
   private readonly life = new Float32Array(MAX_PARTICLES);
   private readonly geometry = new THREE.BufferGeometry();
   private readonly material: THREE.RawShaderMaterial;
@@ -134,7 +159,7 @@ export class ParticleSystem {
   constructor(textures: BlockTextures) {
     this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
     this.geometry.setAttribute('info', new THREE.BufferAttribute(this.info, 4));
-    this.geometry.setAttribute('light', new THREE.BufferAttribute(this.light, 1));
+    this.geometry.setAttribute('extra', new THREE.BufferAttribute(this.extra, 2));
     this.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e9);
     this.material = new THREE.RawShaderMaterial({
       glslVersion: THREE.GLSL3,
@@ -147,37 +172,53 @@ export class ParticleSystem {
   }
 
   setViewportHeight(px: number): void {
-    this.material.uniforms.uScale!.value = px * 0.42;
+    // World size → pixels: viewport height / (2·tan(fov/2)) ≈ 0.65·height at 75°.
+    this.material.uniforms.uScale!.value = px * 0.65;
   }
 
-  /** Bursts particles from a broken block using its texture layer. */
+  spawn(p: ParticleSpec): void {
+    const k = this.next;
+    this.next = (this.next + 1) % MAX_PARTICLES;
+    const uvScale = p.uvScale ?? 1;
+    const cells = Math.round(1 / uvScale);
+    this.positions[k * 3] = p.x;
+    this.positions[k * 3 + 1] = p.y;
+    this.positions[k * 3 + 2] = p.z;
+    this.velocity[k * 3] = p.vx;
+    this.velocity[k * 3 + 1] = p.vy;
+    this.velocity[k * 3 + 2] = p.vz;
+    this.info[k * 4] = p.layer;
+    this.info[k * 4 + 1] = Math.floor(Math.random() * cells) * uvScale;
+    this.info[k * 4 + 2] = Math.floor(Math.random() * cells) * uvScale;
+    this.info[k * 4 + 3] = p.size;
+    this.extra[k * 2] = p.brightness;
+    this.extra[k * 2 + 1] = uvScale;
+    this.gravity[k] = p.gravity;
+    this.collide[k] = p.collide ? 1 : 0;
+    this.life[k] = p.life;
+  }
+
+  /** Bursts fragments from a broken block using its texture layer. */
   burst(x: number, y: number, z: number, layer: number, brightness: number, count = 28): void {
     for (let i = 0; i < count; i++) {
-      const k = this.next;
-      this.next = (this.next + 1) % MAX_PARTICLES;
       const px = x + 0.15 + Math.random() * 0.7;
       const py = y + 0.15 + Math.random() * 0.7;
       const pz = z + 0.15 + Math.random() * 0.7;
-      this.positions.set([px, py, pz], k * 3);
-      this.velocity.set(
-        [
-          (px - x - 0.5) * 3 + (Math.random() - 0.5),
-          1.5 + Math.random() * 2.5,
-          (pz - z - 0.5) * 3 + (Math.random() - 0.5),
-        ],
-        k * 3,
-      );
-      this.info.set(
-        [
-          layer,
-          Math.floor(Math.random() * 4) * 0.25,
-          Math.floor(Math.random() * 4) * 0.25,
-          0.08 + Math.random() * 0.06,
-        ],
-        k * 4,
-      );
-      this.light[k] = brightness;
-      this.life[k] = 0.5 + Math.random() * 0.6;
+      this.spawn({
+        x: px,
+        y: py,
+        z: pz,
+        vx: (px - x - 0.5) * 3 + (Math.random() - 0.5),
+        vy: 1.5 + Math.random() * 2.5,
+        vz: (pz - z - 0.5) * 3 + (Math.random() - 0.5),
+        layer,
+        size: 0.08 + Math.random() * 0.06,
+        life: 0.5 + Math.random() * 0.6,
+        brightness,
+        gravity: 18,
+        uvScale: 0.25,
+        collide: true,
+      });
     }
   }
 
@@ -192,11 +233,11 @@ export class ParticleSystem {
       }
       alive = true;
       const i = k * 3;
-      this.velocity[i + 1]! -= 18 * dt;
+      this.velocity[i + 1]! -= this.gravity[k]! * dt;
       const nx = this.positions[i]! + this.velocity[i]! * dt;
       const ny = this.positions[i + 1]! + this.velocity[i + 1]! * dt;
       const nz = this.positions[i + 2]! + this.velocity[i + 2]! * dt;
-      if (isSolid(Math.floor(nx), Math.floor(ny), Math.floor(nz))) {
+      if (this.collide[k] && isSolid(Math.floor(nx), Math.floor(ny), Math.floor(nz))) {
         this.velocity[i]! *= 0.3;
         this.velocity[i + 1] = 0;
         this.velocity[i + 2]! *= 0.3;
@@ -208,7 +249,7 @@ export class ParticleSystem {
     }
     this.geometry.attributes.position!.needsUpdate = true;
     this.geometry.attributes.info!.needsUpdate = true;
-    this.geometry.attributes.light!.needsUpdate = true;
+    this.geometry.attributes.extra!.needsUpdate = true;
     this.object.visible = alive;
   }
 }

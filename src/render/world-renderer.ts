@@ -42,29 +42,12 @@ function decodeKey(key: number): [number, number, number] {
   return [cx, sy, cz];
 }
 
-export class WorldRenderer {
-  readonly group = new THREE.Group();
+/** The three terrain materials (opaque, cut-out, transparent) and their shared uniforms. */
+export class TerrainMaterials {
   readonly uniforms: TerrainUniforms;
-  private readonly materials: THREE.RawShaderMaterial[];
-  private readonly sections = new Map<number, SectionEntry>();
-  private readonly inFlight = new Set<number>();
-  /**
-   * Columns whose sections have all been meshed once. Until then a column's
-   * meshes stay hidden, so nobody sees into caves through a surface section
-   * that is still being built.
-   */
-  private readonly revealed = new Set<number>();
-  private readonly sphere = new THREE.Sphere(new THREE.Vector3(8, 8, 8), 14);
-  options: MeshOptions = { fastLeaves: false };
-  /** Sections meshed since creation (for stats and loading screens). */
-  meshedCount = 0;
+  readonly list: THREE.RawShaderMaterial[];
 
-  constructor(
-    textures: BlockTextures,
-    private readonly pool: WorkerPool<MeshRequest, MeshResponse>,
-  ) {
-    this.group.name = 'terrain';
-    this.group.matrixAutoUpdate = false;
+  constructor(textures: BlockTextures) {
     this.uniforms = {
       uTime: { value: 0 },
       uDaylight: { value: 1 },
@@ -95,7 +78,50 @@ export class WorldRenderer {
       m.name = ['terrain-opaque', 'terrain-cutout', 'terrain-transparent'][layer]!;
       return m;
     };
-    this.materials = [make(Layer.Opaque), make(Layer.Cutout), make(Layer.Transparent)];
+    this.list = [make(Layer.Opaque), make(Layer.Cutout), make(Layer.Transparent)];
+  }
+
+  setFog(near: number, far: number): void {
+    this.uniforms.uFogNear.value = near;
+    this.uniforms.uFogFar.value = far;
+  }
+}
+
+/** Builds three.js geometry from mesher output. */
+export function layerGeometry(g: LayerGeometry, sphere?: THREE.Sphere): THREE.BufferGeometry {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(g.position, 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(g.uv, 2));
+  geo.setAttribute('tex', new THREE.BufferAttribute(g.tex, 1));
+  geo.setAttribute('light', new THREE.BufferAttribute(g.light, 4, true));
+  geo.setAttribute('color', new THREE.BufferAttribute(g.color, 4, true));
+  geo.setIndex(new THREE.BufferAttribute(g.index, 1));
+  if (sphere) geo.boundingSphere = sphere.clone();
+  else geo.computeBoundingSphere();
+  return geo;
+}
+
+export class WorldRenderer {
+  readonly group = new THREE.Group();
+  private readonly sections = new Map<number, SectionEntry>();
+  private readonly inFlight = new Set<number>();
+  /**
+   * Columns whose sections have all been meshed once. Until then a column's
+   * meshes stay hidden, so nobody sees into caves through a surface section
+   * that is still being built.
+   */
+  private readonly revealed = new Set<number>();
+  private readonly sphere = new THREE.Sphere(new THREE.Vector3(8, 8, 8), 14);
+  options: MeshOptions = { fastLeaves: false };
+  /** Sections meshed since creation (for stats and loading screens). */
+  meshedCount = 0;
+
+  constructor(
+    private readonly materials: TerrainMaterials,
+    private readonly pool: WorkerPool<MeshRequest, MeshResponse>,
+  ) {
+    this.group.name = 'terrain';
+    this.group.matrixAutoUpdate = false;
   }
 
   get sectionCount(): number {
@@ -104,11 +130,6 @@ export class WorldRenderer {
 
   get pendingCount(): number {
     return this.inFlight.size;
-  }
-
-  setFog(near: number, far: number): void {
-    this.uniforms.uFogNear.value = near;
-    this.uniforms.uFogFar.value = far;
   }
 
   /** Dispatches mesh jobs for the nearest dirty sections. */
@@ -204,7 +225,7 @@ export class WorldRenderer {
       }
       const g = mesh.layers[layer];
       if (!g) continue;
-      const m = new THREE.Mesh(this.geometry(g), this.materials[layer]!);
+      const m = new THREE.Mesh(layerGeometry(g, this.sphere), this.materials.list[layer]!);
       m.position.set(cx * 16, sy * 16, cz * 16);
       m.matrixAutoUpdate = false;
       m.updateMatrix();
@@ -215,18 +236,6 @@ export class WorldRenderer {
       this.group.add(m);
     }
     if (entry.meshes.every((m) => m === null)) this.sections.delete(key);
-  }
-
-  private geometry(g: LayerGeometry): THREE.BufferGeometry {
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(g.position, 3));
-    geo.setAttribute('uv', new THREE.BufferAttribute(g.uv, 2));
-    geo.setAttribute('tex', new THREE.BufferAttribute(g.tex, 1));
-    geo.setAttribute('light', new THREE.BufferAttribute(g.light, 4, true));
-    geo.setAttribute('color', new THREE.BufferAttribute(g.color, 4, true));
-    geo.setIndex(new THREE.BufferAttribute(g.index, 1));
-    geo.boundingSphere = this.sphere.clone();
-    return geo;
   }
 
   private remove(key: number): void {
@@ -242,6 +251,5 @@ export class WorldRenderer {
 
   dispose(): void {
     for (const key of [...this.sections.keys()]) this.remove(key);
-    for (const m of this.materials) m.dispose();
   }
 }
