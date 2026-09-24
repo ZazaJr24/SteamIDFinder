@@ -46,7 +46,7 @@ async function boot(): Promise<void> {
   const game = new Game({ canvas, ui, platform, settings, input });
   await game.init((p) => loading.setProgress(0.2 + p * 0.3));
   game.start();
-  game.startWorld();
+  await game.openLatestWorld();
 
   // Let the area around the spawn generate behind the loading screen, so the
   // menu shows a living world and "Play" drops the player straight in.

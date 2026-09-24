@@ -313,6 +313,10 @@ export function buildTextureSet(): TextureSet {
   def('crafting_table_front', ({ rng, get }) => craftingSide(rng, get('oak_planks'), true));
   def('bookshelf', ({ rng, get }) => bookshelf(rng, get('oak_planks')));
 
+  // Block breaking cracks: 10 stages, each adding to the previous one.
+  const cracks = crackStages(new Random(seedFromString('tex:cracks')), 10);
+  cracks.forEach((tile, i) => def(`destroy_stage_${i}`, () => tile));
+
   // Wool in 16 colors
   for (const [name, color] of Object.entries(DYE_COLORS))
     def(`${name}_wool`, ({ rng }) => wool(rng, color));
@@ -340,6 +344,41 @@ export const DYE_COLORS: Record<string, string> = {
 };
 
 // ------------------------------------------------------- one-off drawings
+
+/** Cumulative crack patterns: branching dark lines growing from the center. */
+function crackStages(rng: Random, stages: number): Tile[] {
+  const out: Tile[] = [];
+  const t = new Tile().fill(P.CLEAR);
+  const dark = withAlpha(hex('#000000'), 200);
+  const mid = withAlpha(hex('#1a1a1a'), 130);
+  const tips: [number, number, number, number][] = [];
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2 + rng.range(-0.3, 0.3);
+    tips.push([7.5, 7.5, Math.cos(a), Math.sin(a)]);
+  }
+  for (let s = 0; s < stages; s++) {
+    const steps = 2 + Math.floor(s / 2);
+    for (const tip of tips) {
+      for (let k = 0; k < steps; k++) {
+        tip[0] += tip[2] + rng.range(-0.5, 0.5);
+        tip[1] += tip[3] + rng.range(-0.5, 0.5);
+        const x = Math.round(tip[0]);
+        const y = Math.round(tip[1]);
+        if (x < 0 || x > 15 || y < 0 || y > 15) continue;
+        t.set(x, y, dark);
+        if (rng.chance(0.4)) t.set(x + 1, y, mid);
+      }
+    }
+    // Occasionally a new branch splits off.
+    if (s % 2 === 1 && tips.length < 12) {
+      const from = tips[rng.int(tips.length)]!;
+      const a = Math.atan2(from[3], from[2]) + rng.range(0.6, 1.2) * (rng.chance(0.5) ? 1 : -1);
+      tips.push([from[0], from[1], Math.cos(a), Math.sin(a)]);
+    }
+    out.push(t.clone());
+  }
+  return out;
+}
 
 function birchBark(rng: Random, _pal: readonly RGBA[]): Tile {
   const white = ramp('#dedbd2', 4, 0.12);

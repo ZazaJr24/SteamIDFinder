@@ -74,7 +74,7 @@ export class ChunkManager {
       const dx = col.cx - pcx;
       const dz = col.cz - pcz;
       if (dx * dx + dz * dz > keep * keep) {
-        if (col.modified) this.source?.unload(col);
+        if (col.unsaved) this.source?.unload(col);
         this.world.removeColumn(col.cx, col.cz);
       }
     }
@@ -109,7 +109,10 @@ export class ChunkManager {
           const col = Column.fromData(saved);
           col.modified = true;
           this.pending.delete(key);
-          if (gen === this.generation && !this.world.columns.has(key)) this.world.addColumn(col);
+          if (gen !== this.generation || this.world.columns.has(key)) return;
+          // Saves hold no light; compute it like the generator worker does.
+          this.world.light.lightColumn(col, cx * 16, cz * 16);
+          this.world.addColumn(col);
         } else void generate();
       })
       .catch(() => void generate());

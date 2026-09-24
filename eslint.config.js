@@ -32,4 +32,9 @@ export default tseslint.config(
       'no-constant-condition': ['error', { checkLoops: false }],
     },
   },
+  {
+    // Browser tests poke at the running game through window.game.
+    files: ['tests/e2e/**'],
+    rules: { '@typescript-eslint/no-explicit-any': 'off' },
+  },
 );

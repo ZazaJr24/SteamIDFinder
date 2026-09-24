@@ -57,6 +57,25 @@ export class Hotbar {
     return this.selected;
   }
 
+  stateAt(i: number): number | null {
+    return this.items[i] ?? null;
+  }
+
+  /** Contents as state names (for saving). */
+  serialize(): (string | null)[] {
+    return this.items.map((s) => (s === null ? null : BLOCKS.stateName(s)));
+  }
+
+  restore(names: (string | null)[] | undefined): void {
+    if (!names) return;
+    for (let i = 0; i < 9; i++) {
+      const name = names[i];
+      const state = name ? BLOCKS.stateFromName(name) : -1;
+      this.items[i] = state > 0 ? state : null;
+    }
+    this.render();
+  }
+
   select(i: number): void {
     this.selected = ((i % 9) + 9) % 9;
     this.render();

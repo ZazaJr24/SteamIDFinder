@@ -67,7 +67,10 @@ export class World implements LightWorld {
     const old = col.getBlock(x & 15, y, z & 15);
     if (old === state) return true;
     col.setBlock(x & 15, y, z & 15, state);
-    if (byPlayer) col.modified = true;
+    if (byPlayer) {
+      col.modified = true;
+      col.unsaved = true;
+    }
     this.markDirty(x, y, z);
     const reg = BLOCKS;
     if (reg.opacity[old] !== reg.opacity[state] || reg.emission[old] !== reg.emission[state]) {

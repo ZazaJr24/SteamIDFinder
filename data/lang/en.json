@@ -42,5 +42,17 @@
   "mode.creative": "Creative",
   "mode.peaceful": "Peaceful",
   "hud.fps": "{n} FPS",
-  "error.webgl": "Your browser or device does not support WebGL 2, which this game needs."
+  "error.webgl": "Your browser or device does not support WebGL 2, which this game needs.",
+  "inventory.title": "Blocks",
+  "inventory.search": "Search…",
+  "inventory.hint": "Click a block to put it in the selected slot · 1–9 while hovering · right-click a slot to clear",
+  "inventory.tab.all": "All",
+  "inventory.tab.building": "Building",
+  "inventory.tab.nature": "Nature",
+  "inventory.tab.decoration": "Decoration",
+  "inventory.tab.utility": "Utility",
+  "world.deleteSure": "Sure?",
+  "world.notPersistent": "Your browser blocks storage: worlds are kept only until you close this tab.",
+  "world.seedHint": "random",
+  "hud.loadingWorld": "Loading world…"
 }

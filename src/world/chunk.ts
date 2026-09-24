@@ -41,8 +41,10 @@ export interface ColumnData {
  */
 export class Column {
   readonly sections: (Section | null)[] = new Array<Section | null>(SECTIONS_PER_COLUMN).fill(null);
-  /** Changed by the player since load (needs saving). */
+  /** Differs from what the generator produces (loaded from a save or edited). */
   modified = false;
+  /** Has changes that are not written to the save yet. */
+  unsaved = false;
 
   constructor(
     readonly cx: number,
