@@ -44,9 +44,24 @@ async function boot(): Promise<void> {
 
   const input = new Input(canvas);
   const game = new Game({ canvas, ui, platform, settings, input });
-  loading.setProgress(1);
-  platform.loadingStop();
+  await game.init((p) => loading.setProgress(0.2 + p * 0.3));
   game.start();
+  game.startWorld();
+
+  // Let the area around the spawn generate behind the loading screen, so the
+  // menu shows a living world and "Play" drops the player straight in.
+  loading.setProgress(0.5, t('menu.generating'));
+  await new Promise<void>((resolve) => {
+    const started = performance.now();
+    const poll = () => {
+      const p = game.spawnProgress();
+      loading.setProgress(0.5 + p * 0.5);
+      if (p >= 0.999 || performance.now() - started > 12000) resolve();
+      else setTimeout(poll, 50);
+    };
+    poll();
+  });
+  platform.loadingStop();
   game.showMainMenu();
 
   // Handy for debugging from the console and for end-to-end tests.

@@ -4,7 +4,16 @@ import globals from 'globals';
 import prettier from 'eslint-config-prettier';
 
 export default tseslint.config(
-  { ignores: ['dist', 'public/generated', 'node_modules', 'test-results', 'playwright-report'] },
+  {
+    ignores: [
+      'dist',
+      'public/generated',
+      'node_modules',
+      'test-results',
+      'playwright-report',
+      '.texgen',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   prettier,
