@@ -60,6 +60,11 @@ export class Input {
   private readonly lockListeners = new Set<(locked: boolean) => void>();
   private readonly keyListeners = new Set<(code: string, e: KeyboardEvent) => void>();
   bindings: Record<Action, string[]> = structuredClone(DEFAULT_BINDINGS);
+  private readonly virtualKeys = new Set<string>();
+  private readonly virtualButtons = new Set<number>();
+  private readonly virtualPressed = new Set<number>();
+  /** Analog movement from a touch joystick (overrides WASD while set). */
+  analog: { forward: number; strafe: number } | null = null;
   /** When false, game input is ignored (menus open). Keys are still tracked for UI. */
   enabled = true;
 
@@ -89,7 +94,7 @@ export class Input {
   /** Is the action held right now? */
   isDown(action: Action): boolean {
     if (!this.enabled) return false;
-    return this.bindings[action].some((code) => this.down.has(code));
+    return this.bindings[action].some((code) => this.down.has(code) || this.virtualKeys.has(code));
   }
 
   /** Was the action pressed since the last `endFrame()`? */
@@ -107,11 +112,11 @@ export class Input {
   }
 
   isMouseDown(button: MouseButton): boolean {
-    return this.enabled && this.mouseDown.has(button);
+    return this.enabled && (this.mouseDown.has(button) || this.virtualButtons.has(button));
   }
 
   wasMousePressed(button: MouseButton): boolean {
-    return this.enabled && this.mousePressed.has(button);
+    return this.enabled && (this.mousePressed.has(button) || this.virtualPressed.has(button));
   }
 
   wasMouseReleased(button: MouseButton): boolean {
@@ -137,7 +142,29 @@ export class Input {
   endFrame(): void {
     this.pressed.clear();
     this.mousePressed.clear();
+    this.virtualPressed.clear();
     this.mouseReleased.clear();
+  }
+
+  /** Presses or releases a key from on-screen controls. */
+  setVirtualKey(code: string, down: boolean): void {
+    if (down && !this.virtualKeys.has(code)) {
+      this.virtualKeys.add(code);
+      this.pressed.add(code);
+      for (const fn of this.keyListeners) fn(code, new KeyboardEvent('keydown', { code }));
+    } else if (!down) this.virtualKeys.delete(code);
+  }
+
+  setVirtualButton(button: MouseButton, down: boolean): void {
+    if (down && !this.virtualButtons.has(button)) this.virtualPressed.add(button);
+    if (down) this.virtualButtons.add(button);
+    else this.virtualButtons.delete(button);
+  }
+
+  /** Adds look movement (touch drag) in pixels. */
+  addLook(dx: number, dy: number): void {
+    this.dx += dx;
+    this.dy += dy;
   }
 
   get isPointerLocked(): boolean {

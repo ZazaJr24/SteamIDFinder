@@ -2,7 +2,8 @@ import './render/setup';
 import * as THREE from 'three';
 import { GameLoop, FixedStepper } from './core/loop';
 import type { Input } from './core/input';
-import type { Settings, SettingsStore } from './core/settings';
+import { isMobileDevice, type Settings, type SettingsStore } from './core/settings';
+import { TouchControls } from './ui/touch';
 import { randomSeed, seedFromString } from './core/random';
 import { PHYSICS_HZ, TICKS_PER_SECOND } from './config';
 import type { Platform } from './platform/crazygames';
@@ -124,6 +125,12 @@ export class Game {
     this.scene.add(this.selection.object);
     this.hud = new Hud(ctx.ui.hud);
     this.hotbar = new Hotbar(ctx.ui.hud);
+    if (isMobileDevice()) {
+      new TouchControls(this.hud.el, ctx.input, {
+        pause: () => this.pause(),
+        inventory: () => this.openInventory(),
+      });
+    }
     this.centerLabel = document.createElement('div');
     this.centerLabel.className = 'center-label';
     this.hud.el.append(this.centerLabel);
@@ -416,6 +423,8 @@ export class Game {
           this.showScreen(() => settingsScreen(this.ctx.settings, () => this.showPauseMenu())),
         quit: () => {
           void this.saveSession();
+          // A natural break: the only place a midgame ad may appear.
+          void this.ctx.platform.requestAd('midgame');
           this.showMainMenu();
         },
       }),
@@ -658,8 +667,12 @@ export class Game {
     if (!s) return;
     const input = this.ctx.input;
     const move: MoveInput = {
-      forward: (input.isDown('forward') ? 1 : 0) - (input.isDown('back') ? 1 : 0),
-      strafe: (input.isDown('right') ? 1 : 0) - (input.isDown('left') ? 1 : 0),
+      forward: input.analog
+        ? input.analog.forward
+        : (input.isDown('forward') ? 1 : 0) - (input.isDown('back') ? 1 : 0),
+      strafe: input.analog
+        ? input.analog.strafe
+        : (input.isDown('right') ? 1 : 0) - (input.isDown('left') ? 1 : 0),
       jump: input.isDown('jump'),
       sneak: input.isDown('sneak'),
       sprint: input.isDown('sprint'),

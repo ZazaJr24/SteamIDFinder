@@ -624,3 +624,79 @@ input[type='range'] {
     opacity: 0;
   }
 }
+
+/* ---------------------------------------------------------------- touch */
+
+.touch-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.touch-stick {
+  position: absolute;
+  display: none;
+  width: 112px;
+  height: 112px;
+  margin: -56px 0 0 -56px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.touch-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 48px;
+  height: 48px;
+  margin: -24px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.touch-btn {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  background: rgba(0, 0, 0, 0.3);
+  color: #fff;
+  font: 600 18px var(--font);
+}
+
+.touch-btn.active {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.touch-jump {
+  right: 24px;
+  bottom: 120px;
+}
+
+.touch-sneak {
+  right: 104px;
+  bottom: 96px;
+  width: 52px;
+  height: 52px;
+}
+
+.touch-inv,
+.touch-pause {
+  top: 14px;
+  width: 46px;
+  height: 46px;
+  border-radius: 8px;
+}
+
+.touch-inv {
+  right: 14px;
+}
+
+.touch-pause {
+  left: 14px;
+}
