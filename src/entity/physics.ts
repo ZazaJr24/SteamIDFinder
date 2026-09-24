@@ -44,7 +44,13 @@ export function forEachCollider(world: BlockSource, area: Aabb, fn: (b: Aabb) =>
           continue;
         }
         if (!(BLOCKS.flags[state]! & Flag.Solid)) continue;
-        const shapes = BLOCKS.collision[state];
+        const variant =
+          BLOCKS.variantCount[state]! > 1
+            ? BLOCKS.variantOf(state, (dx, dy, dz) =>
+                Math.max(0, world.getState(x + dx, y + dy, z + dz)),
+              )
+            : 0;
+        const shapes = BLOCKS.collisionOf(state, variant);
         if (!shapes) {
           box.minX = x;
           box.minY = y;

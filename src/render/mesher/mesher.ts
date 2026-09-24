@@ -435,12 +435,17 @@ export class Mesher {
 
   private boxes(input: MeshInput, x: number, y: number, z: number, p: number, state: number): void {
     const reg = this.reg;
-    const boxes = reg.boxes[state];
+    const variant =
+      reg.variantCount[state]! > 1
+        ? reg.variantOf(
+            state,
+            (dx, dy, dz) => input.blocks[p + dx * STRIDE_X + dy * STRIDE_Y + dz * STRIDE_Z]!,
+          )
+        : 0;
+    const boxes = reg.boxesOf(state, variant);
     if (!boxes) return;
     const b = this.builders[reg.layer[state]!]!;
-    const packed = input.light[p]!;
-    const sky = (packed >> 4) * 17;
-    const blk = (packed & 15) * 17;
+    const own = input.light[p]!;
     const pt = this.tmp;
     const verts: number[][] = [[], [], [], []];
     for (const box of boxes) {
@@ -481,6 +486,15 @@ export class Mesher {
             ((nx / len) ** 2 * 0.6 + (nz / len) ** 2 * 0.8 + (ny / len) ** 2 * (ny > 0 ? 1 : 0.5)),
         );
         const tex = face.layer;
+        // Light from the block the face looks at (or the block itself, whichever is brighter).
+        let packed = own;
+        if (!box.rotation) {
+          const dir = FACES[rotateFaceY(fi, box.rotateY ?? 0)]!;
+          const n = input.light[p + (dir.positive ? AXIS_STRIDE[dir.d]! : -AXIS_STRIDE[dir.d]!)]!;
+          packed = (Math.max(own >> 4, n >> 4) << 4) | Math.max(own & 15, n & 15);
+        }
+        const sky = (packed >> 4) * 17;
+        const blk = (packed & 15) * 17;
         // Texture space: u to the right, v downward in texels.
         const uvs = [
           [u0, v1],

@@ -58,6 +58,8 @@ export const enum Flag {
   Selectable = 1 << 5,
   /** Climbable (ladders, vines). */
   Climbable = 1 << 6,
+  /** Receives light but lets none through (slabs, stairs): keeps roofs dark inside. */
+  LightSink = 1 << 7,
 }
 
 export const enum Tint {
@@ -102,11 +104,23 @@ export interface Box {
 
 export type AabbSpec = readonly [number, number, number, number, number, number];
 
+/** State of the block at an offset from the one being evaluated. */
+export type NeighborFn = (dx: number, dy: number, dz: number) => number;
+
+/** Blocks whose shape depends on their neighbours (fences, panes, stair corners). */
+export interface ConnectSpec {
+  /** Number of shape variants. */
+  variants: number;
+  /** Picks the variant from the neighbouring blocks. */
+  variant(p: Props, neighbor: NeighborFn, reg: BlockRegistry): number;
+}
+
 export interface BlockSpec {
   textures?: TextureSpec | ((p: Props) => TextureSpec);
   model?: 'none' | 'cube' | 'cross' | 'liquid' | 'boxes';
-  /** Box geometry for `model: 'boxes'`, per state. Rotations are pre-applied. */
-  boxes?: (p: Props) => Box[];
+  /** Box geometry for `model: 'boxes'`, per state (and connection variant). */
+  boxes?: (p: Props, variant: number) => Box[];
+  connect?: ConnectSpec;
   layer?: 'opaque' | 'cutout' | 'transparent';
   solid?: boolean;
   /** Full opaque cube. Defaults to true for opaque-layer cubes. */
@@ -124,12 +138,14 @@ export interface BlockSpec {
   cullSame?: boolean;
   selectable?: boolean;
   climbable?: boolean;
+  /** Blocks light like an opaque block but is lit itself (partial blocks). */
+  lightSink?: boolean;
   tint?: 'grass' | 'foliage' | 'water';
   wave?: 'leaves' | 'plant';
   properties?: Readonly<Record<string, readonly PropValue[]>>;
   defaults?: Props;
   /** Collision boxes as [x0, y0, z0, x1, y1, z1] in 1/16 units (default: the model boxes). */
-  collision?: (p: Props) => AabbSpec[];
+  collision?: (p: Props, variant: number) => AabbSpec[];
   /** Item dropped when broken. `null` drops nothing; default drops itself. */
   drops?: string | null;
   /** Creative inventory tab. */
@@ -226,12 +242,14 @@ export class BlockRegistry {
   faceTextureNames: string[] = [];
   /** Texture layers per state and face, after resolveTextures(). */
   faceLayer = new Uint16Array(0);
-  /** Boxes per state for Model.Boxes, after resolveTextures(). */
-  boxes: (ResolvedBox[] | null)[] = [];
-  /** Collision boxes per state in block units; `null` means a full cube (if solid). */
-  collision: (Float32Array | null)[] = [];
-  /** Outline box per state in block units (x0, y0, z0, x1, y1, z1). */
-  selection = new Float32Array(0);
+  /** Boxes per state and variant for Model.Boxes, after resolveTextures(). */
+  boxVariants: (ResolvedBox[][] | null)[] = [];
+  /** Collision boxes per state and variant in block units; `null` = full cube (if solid). */
+  collisionVariants: (Float32Array[] | null)[] = [];
+  /** Outline boxes per state and variant, in block units (x0, y0, z0, x1, y1, z1). */
+  selectionVariants: Float32Array[] = [];
+  /** Number of connection variants per state (1 for ordinary blocks). */
+  variantCount = new Uint8Array(0);
 
   register(name: string, spec: BlockSpec = {}): Block {
     if (this.finalized) throw new Error('registry already finalized');
@@ -320,6 +338,26 @@ export class BlockRegistry {
     return (this.flags[state]! & Flag.Selectable) !== 0;
   }
 
+  /** Connection variant of a state given its neighbours (0 for ordinary blocks). */
+  variantOf(state: number, neighbor: NeighborFn): number {
+    if (this.variantCount[state]! <= 1) return 0;
+    const block = this.blockOf(state);
+    return block.spec.connect!.variant(block.propsOf(state), neighbor, this);
+  }
+
+  boxesOf(state: number, variant = 0): ResolvedBox[] | null {
+    return this.boxVariants[state]?.[variant] ?? null;
+  }
+
+  /** Collision boxes in block units, or null for a full cube. */
+  collisionOf(state: number, variant = 0): Float32Array | null {
+    return this.collisionVariants[state]?.[variant] ?? null;
+  }
+
+  selectionOf(state: number, variant = 0): Float32Array {
+    return this.selectionVariants[state]!.subarray(variant * 6, variant * 6 + 6);
+  }
+
   finalize(): this {
     if (this.finalized) return this;
     let next = 0;
@@ -340,9 +378,10 @@ export class BlockRegistry {
     this.hardness = new Float32Array(n);
     this.faceTextureNames = new Array<string>(n * 6).fill('missing');
     this.faceLayer = new Uint16Array(n * 6);
-    this.boxes = new Array<ResolvedBox[] | null>(n).fill(null);
-    this.collision = new Array<Float32Array | null>(n).fill(null);
-    this.selection = new Float32Array(n * 6);
+    this.boxVariants = new Array<ResolvedBox[][] | null>(n).fill(null);
+    this.collisionVariants = new Array<Float32Array[] | null>(n).fill(null);
+    this.selectionVariants = new Array<Float32Array>(n);
+    this.variantCount = new Uint8Array(n);
 
     for (const b of this.blocks) {
       const s = b.spec;
@@ -379,11 +418,12 @@ export class BlockRegistry {
         if (s.cullSame) f |= Flag.CullSame;
         if (s.selectable ?? (modelId !== Model.None && !s.liquid)) f |= Flag.Selectable;
         if (s.climbable) f |= Flag.Climbable;
+        if (s.lightSink) f |= Flag.LightSink;
         this.flags[state] = f;
         const emission =
           typeof s.lightEmission === 'function' ? s.lightEmission(props) : (s.lightEmission ?? 0);
         this.emission[state] = emission;
-        this.opacity[state] = s.lightOpacity ?? (opaque ? 15 : 0);
+        this.opacity[state] = s.lightOpacity ?? (opaque || s.lightSink ? 15 : 0);
         this.tint[state] =
           s.tint === 'grass'
             ? Tint.Grass
@@ -395,40 +435,45 @@ export class BlockRegistry {
         this.wave[state] =
           s.wave === 'leaves' ? Wave.Leaves : s.wave === 'plant' ? Wave.Plant : Wave.None;
         this.hardness[state] = s.hardness ?? 1;
-        const boxes = s.boxes?.(props) ?? [];
-        const aabbs: AabbSpec[] =
-          s.collision?.(props) ?? boxes.map((bx) => [...bx.from, ...bx.to] as unknown as AabbSpec);
-        if (modelId === Model.Boxes || s.collision) {
+        const variants = s.connect?.variants ?? 1;
+        this.variantCount[state] = variants;
+        const selections = new Float32Array(variants * 6);
+        const collisions: Float32Array[] = [];
+        for (let v = 0; v < variants; v++) {
+          const boxes = s.boxes?.(props, v) ?? [];
+          const aabbs: AabbSpec[] = s.collision?.(props, v) ?? boxes.map((bx) => rotatedAabb(bx));
           const flat = new Float32Array(aabbs.length * 6);
           aabbs.forEach((a, k) => {
             for (let j = 0; j < 6; j++) flat[k * 6 + j] = a[j]! / 16;
           });
-          this.collision[state] = flat;
-        }
-        const sel = this.selection.subarray(state * 6, state * 6 + 6);
-        if (modelId === Model.Boxes && boxes.length > 0) {
-          sel.set([1, 1, 1, 0, 0, 0]);
-          const p: number[] = [0, 0, 0];
-          for (const bx of boxes) {
-            for (let corner = 0; corner < 8; corner++) {
-              transformPoint(
-                bx,
-                corner & 1 ? bx.to[0] : bx.from[0],
-                corner & 2 ? bx.to[1] : bx.from[1],
-                corner & 4 ? bx.to[2] : bx.from[2],
-                p,
-              );
-              for (let j = 0; j < 3; j++) {
-                sel[j] = Math.max(0, Math.min(sel[j]!, p[j]! / 16));
-                sel[j + 3] = Math.min(1, Math.max(sel[j + 3]!, p[j]! / 16));
+          collisions.push(flat);
+          const sel = selections.subarray(v * 6, v * 6 + 6);
+          if (modelId === Model.Boxes && boxes.length > 0) {
+            sel.set([1, 1, 1, 0, 0, 0]);
+            const p: number[] = [0, 0, 0];
+            for (const bx of boxes) {
+              for (let corner = 0; corner < 8; corner++) {
+                transformPoint(
+                  bx,
+                  corner & 1 ? bx.to[0] : bx.from[0],
+                  corner & 2 ? bx.to[1] : bx.from[1],
+                  corner & 4 ? bx.to[2] : bx.from[2],
+                  p,
+                );
+                for (let j = 0; j < 3; j++) {
+                  sel[j] = Math.max(0, Math.min(sel[j]!, p[j]! / 16));
+                  sel[j + 3] = Math.min(1, Math.max(sel[j + 3]!, p[j]! / 16));
+                }
               }
             }
+          } else if (modelId === Model.Cross) {
+            sel.set([0.15, 0, 0.15, 0.85, 0.8, 0.85]);
+          } else {
+            sel.set([0, 0, 0, 1, 1, 1]);
           }
-        } else if (modelId === Model.Cross) {
-          sel.set([0.15, 0, 0.15, 0.85, 0.8, 0.85]);
-        } else {
-          sel.set([0, 0, 0, 1, 1, 1]);
         }
+        if (modelId === Model.Boxes || s.collision) this.collisionVariants[state] = collisions;
+        this.selectionVariants[state] = selections;
         if (s.textures) {
           const spec = typeof s.textures === 'function' ? s.textures(props) : s.textures;
           const faces = resolveSpec(spec);
@@ -447,8 +492,10 @@ export class BlockRegistry {
     for (const b of this.blocks) {
       if (!b.spec.boxes) continue;
       for (let i = 0; i < b.stateCount; i++) {
-        for (const box of b.spec.boxes(b.propsOf(b.firstState + i))) {
-          for (const f of Object.values(box.faces)) if (f) names.add(f.tex);
+        for (let v = 0; v < (b.spec.connect?.variants ?? 1); v++) {
+          for (const box of b.spec.boxes(b.propsOf(b.firstState + i), v)) {
+            for (const f of Object.values(box.faces)) if (f) names.add(f.tex);
+          }
         }
       }
     }
@@ -466,21 +513,45 @@ export class BlockRegistry {
       if (!b.spec.boxes) continue;
       for (let i = 0; i < b.stateCount; i++) {
         const state = b.firstState + i;
-        this.boxes[state] = b.spec.boxes(b.propsOf(state)).map((box) => ({
-          ...box,
-          faces: FACE_NAMES.map((fn) => {
-            const f = box.faces[fn];
-            if (!f) return null;
-            return {
-              layer: lookup(f.tex),
-              uv: f.uv ?? defaultUv(box, fn),
-              cull: f.cull ? FACE_NAMES.indexOf(f.cull) : -1,
-            };
-          }),
-        }));
+        const props = b.propsOf(state);
+        const variants: ResolvedBox[][] = [];
+        for (let v = 0; v < (b.spec.connect?.variants ?? 1); v++) {
+          variants.push(
+            b.spec.boxes(props, v).map((box) => ({
+              ...box,
+              faces: FACE_NAMES.map((fn) => {
+                const f = box.faces[fn];
+                if (!f) return null;
+                return {
+                  layer: lookup(f.tex),
+                  uv: f.uv ?? defaultUv(box, fn),
+                  cull: f.cull ? FACE_NAMES.indexOf(f.cull) : -1,
+                };
+              }),
+            })),
+          );
+        }
+        this.boxVariants[state] = variants;
       }
     }
   }
+}
+
+/** Axis-aligned bounds of a box after its Y rotation (tilts are ignored). */
+function rotatedAabb(bx: Box): AabbSpec {
+  const a: number[] = [0, 0, 0];
+  const b: number[] = [0, 0, 0];
+  const t = { rotateY: bx.rotateY ?? 0 } as const;
+  transformPoint(t, bx.from[0], bx.from[1], bx.from[2], a);
+  transformPoint(t, bx.to[0], bx.to[1], bx.to[2], b);
+  return [
+    Math.min(a[0]!, b[0]!),
+    Math.min(a[1]!, b[1]!),
+    Math.min(a[2]!, b[2]!),
+    Math.max(a[0]!, b[0]!),
+    Math.max(a[1]!, b[1]!),
+    Math.max(a[2]!, b[2]!),
+  ];
 }
 
 /** Texture region matching the box extent on that face (like Minecraft's auto-UV). */

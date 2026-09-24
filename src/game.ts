@@ -30,9 +30,11 @@ import { defaultWorkerCount, WorkerPool } from './workers/pool';
 import type { GenRequest, GenResponse } from './workers/gen.worker';
 import type { MeshRequest, MeshResponse } from './workers/mesh.worker';
 import { Interaction } from './gameplay/interaction';
+import { PowerSystem } from './gameplay/power';
 import { Hud } from './ui/hud';
 import { Hotbar } from './ui/hotbar';
 import { creativeInventory } from './ui/creative';
+import { IconRenderer, setIconRenderer } from './ui/icons';
 import { setLanguage, t } from './ui/i18n';
 import { mainMenu, pauseMenu, settingsScreen, type UIManager } from './ui/screens';
 import { createWorldScreen, worldList, type NewWorld } from './ui/worlds';
@@ -71,6 +73,12 @@ interface Session {
   autosave: number;
   /** Time of day in ticks (24000 per day). */
   time: number;
+  power: PowerSystem;
+  /** Delayed actions (button releases, pressure plates) in game seconds. */
+  timers: { at: number; fn: () => void }[];
+  clock: number;
+  /** Pressure plates currently weighed down by the player. */
+  plates: Map<string, number>;
 }
 
 /** Top-level game object: owns the renderer, the loop and the screen flow. */
@@ -154,6 +162,7 @@ export class Game {
     this.particles.setViewportHeight(window.innerHeight);
     this.scene.add(this.cracks.object, this.particles.object);
     this.materials = new TerrainMaterials(this.textures);
+    setIconRenderer(new IconRenderer(this.renderer, this.textures));
     this.hand = new HeldItem(this.materials);
     this.hand.setAspect(window.innerWidth / Math.max(1, window.innerHeight));
     this.ambient = new AmbientEffects(this.particles, {
@@ -236,6 +245,8 @@ export class Game {
       player.yaw = Math.PI * 0.25;
     }
     this.hotbar.restore(meta.hotbar);
+    const power = new PowerSystem(world);
+    const timers: Session['timers'] = [];
     const interaction = new Interaction(
       world,
       player,
@@ -243,9 +254,18 @@ export class Game {
       this.selection,
       this.cracks!,
       this.particles!,
+      power,
+      {
+        schedule: (seconds, fn) => {
+          const s = this.session;
+          if (s) s.timers.push({ at: s.clock + seconds, fn });
+        },
+        sleep: (x, y, z) => this.sleep(x, y, z),
+      },
       {
         onBreak: () => this.hand?.swingOnce(),
         onPlace: () => this.hand?.swingOnce(),
+        onUse: () => this.hand?.swingOnce(),
       },
     );
     this.session = {
@@ -262,6 +282,10 @@ export class Game {
       persisted,
       autosave: AUTOSAVE_SECONDS,
       time: meta.time,
+      power,
+      timers,
+      clock: 0,
+      plates: new Map(),
       physics: new FixedStepper(PHYSICS_HZ, (dt) => this.physicsStep(dt)),
     };
     this.applySettings(this.ctx.settings.value);
@@ -485,6 +509,64 @@ export class Game {
     if (digit) this.hotbar.select(Number(digit[1]) - 1);
   }
 
+  // ------------------------------------------------------------- actions
+
+  /** Beds set the spawn point and, at night, skip to the morning. */
+  private sleep(x: number, y: number, z: number): void {
+    const s = this.session;
+    if (!s) return;
+    s.meta.extra = { ...(s.meta.extra ?? {}), spawnPoint: { x: x + 0.5, y: y + 1, z: z + 0.5 } };
+    const day = ((s.time % 24000) + 24000) % 24000;
+    if (day < 12500 || day > 23500) {
+      this.hud.toast(t('bed.onlyNight'));
+      return;
+    }
+    this.hud.fadeOut();
+    setTimeout(() => {
+      if (this.session !== s) return;
+      s.time += 24000 - day + 300;
+      this.hud.toast(t('bed.goodMorning'));
+      void this.saveSession();
+    }, 1200);
+  }
+
+  /** Runs due timers and presses/releases pressure plates under the player. */
+  private updateMechanics(s: Session, dt: number): void {
+    s.clock += dt;
+    if (s.timers.length) {
+      const due = s.timers.filter((t) => t.at <= s.clock);
+      s.timers = s.timers.filter((t) => t.at > s.clock);
+      for (const t of due) t.fn();
+    }
+    if (!s.spawned) return;
+    const box = s.player.box();
+    const y = Math.floor(box.minY + 0.01);
+    for (let x = Math.floor(box.minX); x <= Math.floor(box.maxX - 1e-6); x++) {
+      for (let z = Math.floor(box.minZ); z <= Math.floor(box.maxZ - 1e-6); z++) {
+        const state = s.world.getBlock(x, y, z);
+        const block = BLOCKS.blockOf(state);
+        if (!block.name.endsWith('_pressure_plate')) continue;
+        s.plates.set(`${x},${y},${z}`, s.clock);
+        if (!block.propsOf(state).powered) {
+          const on = block.state({ powered: true });
+          s.world.setBlock(x, y, z, on);
+          s.power.sourceChanged(x, y, z, on);
+        }
+      }
+    }
+    for (const [key, last] of s.plates) {
+      if (s.clock - last < 0.6) continue;
+      s.plates.delete(key);
+      const [x, y, z] = key.split(',').map(Number) as [number, number, number];
+      const state = s.world.getBlock(x, y, z);
+      const block = BLOCKS.blockOf(state);
+      if (!block.name.endsWith('_pressure_plate') || !block.propsOf(state).powered) continue;
+      const off = block.state({ powered: false });
+      s.world.setBlock(x, y, z, off);
+      s.power.sourceChanged(x, y, z, off);
+    }
+  }
+
   // ---------------------------------------------------------------- frame
 
   private frame(dt: number): void {
@@ -497,7 +579,10 @@ export class Game {
       else if (this.state === 'menu') this.updateMenuCamera(s);
       else this.placeCamera(s, 1);
       // The day goes on unless the game is paused.
-      if (this.state !== 'paused') s.time += dt * TICKS_PER_SECOND;
+      if (this.state !== 'paused') {
+        s.time += dt * TICKS_PER_SECOND;
+        this.updateMechanics(s, dt);
+      }
       const focus = s.player.position;
       s.chunks.update(focus.x, focus.z);
       s.renderer.update(s.world, this.camera.position);

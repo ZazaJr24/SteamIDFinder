@@ -7,7 +7,7 @@
  * thread (block edits, stitching newly loaded neighbours).
  */
 import { MAX_LIGHT, WORLD_HEIGHT } from '../../config';
-import type { BlockRegistry } from '../blocks/registry';
+import { Flag, type BlockRegistry } from '../blocks/registry';
 import { FULL_SKY, type Column } from '../chunk';
 
 export interface LightWorld {
@@ -113,6 +113,7 @@ export class LightEngine {
     const q = this.spread[ch]!;
     const p = this.tmp;
     const opacity = this.reg.opacity;
+    const flags = this.reg.flags;
     while (!q.empty) {
       q.pop(p);
       const x = p[0]!;
@@ -129,7 +130,15 @@ export class LightEngine {
         const state = world.getState(nx, ny, nz);
         if (state < 0) continue;
         const op = opacity[state]!;
-        if (op >= MAX_LIGHT) continue;
+        if (op >= MAX_LIGHT) {
+          // Partial blocks (slabs, stairs) take on light but pass none on.
+          if (flags[state]! & Flag.LightSink) {
+            const packed = world.getLight(nx, ny, nz);
+            const lit = level - 1;
+            if (get(packed, ch) < lit) world.setLight(nx, ny, nz, put(packed, ch, lit));
+          }
+          continue;
+        }
         // Sunlight travels straight down without loss through clear blocks.
         const next =
           ch === Channel.Sky && d === DOWN && level === MAX_LIGHT && op === 0

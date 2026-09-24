@@ -9,6 +9,8 @@ export interface RayHit {
   /** Face of the block that was hit. */
   face: Face;
   state: number;
+  /** Connection variant (fences, panes, stairs). */
+  variant: number;
   distance: number;
   /** Exact hit point. */
   point: [number, number, number];
@@ -90,7 +92,10 @@ export function raycast(
     if (y >= 0 && y < 256) {
       const state = world.getBlock(x, y, z);
       if (state !== 0 && BLOCKS.flags[state]! & Flag.Selectable) {
-        const sel = BLOCKS.selection.subarray(state * 6, state * 6 + 6);
+        const variant = BLOCKS.variantOf(state, (dx, dy, dz) =>
+          world.getBlock(x + dx, y + dy, z + dz),
+        );
+        const sel = BLOCKS.selectionOf(state, variant);
         const hit = rayBox(ox, oy, oz, dx, dy, dz, sel, x, y, z);
         if (hit && hit[0] <= maxDistance) {
           const d = hit[0];
@@ -100,6 +105,7 @@ export function raycast(
             z,
             face: hit[1],
             state,
+            variant,
             distance: d,
             point: [ox + dx * d, oy + dy * d, oz + dz * d],
           };

@@ -6,6 +6,7 @@ import { GAME_NAME } from './config';
 import { Input } from './core/input';
 import { SettingsStore } from './core/settings';
 import { Game } from './game';
+import { BLOCKS } from './world/blocks/blocks';
 import { Platform } from './platform/crazygames';
 import { LayeredStore, SafeLocalStore } from './platform/storage';
 import { setLanguage, t } from './ui/i18n';
@@ -65,7 +66,7 @@ async function boot(): Promise<void> {
   game.showMainMenu();
 
   // Handy for debugging from the console and for end-to-end tests.
-  (window as unknown as { game: Game }).game = game;
+  Object.assign(window, { game, BLOCKS });
 }
 
 boot().catch((error: unknown) => {

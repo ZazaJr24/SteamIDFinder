@@ -79,17 +79,37 @@ interface WoodSpecies {
   rings: string;
   leaves: string;
   leafHoles?: number;
+  /** Door window style. */
+  door: 'twin' | 'grid' | 'solid' | 'porthole' | 'slats';
+  /** Trapdoor style. */
+  trapdoor: 'holes' | 'solid' | 'grid';
 }
 
 export const WOODS: Record<string, WoodSpecies> = {
-  oak: { planks: '#a8834f', bark: '#665033', rings: '#b8925a', leaves: '#478a2c' },
-  birch: { planks: '#cdb97f', bark: '#d8d4c9', rings: '#d6c48a', leaves: '#6a9c43' },
+  oak: {
+    planks: '#a8834f',
+    bark: '#665033',
+    rings: '#b8925a',
+    leaves: '#478a2c',
+    door: 'twin',
+    trapdoor: 'holes',
+  },
+  birch: {
+    planks: '#cdb97f',
+    bark: '#d8d4c9',
+    rings: '#d6c48a',
+    leaves: '#6a9c43',
+    door: 'grid',
+    trapdoor: 'grid',
+  },
   spruce: {
     planks: '#765635',
     bark: '#3e2c1c',
     rings: '#8a673f',
     leaves: '#2e5c38',
     leafHoles: 0.1,
+    door: 'solid',
+    trapdoor: 'solid',
   },
   jungle: {
     planks: '#a8744e',
@@ -97,16 +117,34 @@ export const WOODS: Record<string, WoodSpecies> = {
     rings: '#b8855a',
     leaves: '#3a9a22',
     leafHoles: 0.08,
+    door: 'slats',
+    trapdoor: 'grid',
   },
-  acacia: { planks: '#b0602f', bark: '#6a6358', rings: '#bf6f3a', leaves: '#5d8c25' },
+  acacia: {
+    planks: '#b0602f',
+    bark: '#6a6358',
+    rings: '#bf6f3a',
+    leaves: '#5d8c25',
+    door: 'porthole',
+    trapdoor: 'holes',
+  },
   dark_oak: {
     planks: '#4d321b',
     bark: '#3a2a17',
     rings: '#5c3d22',
     leaves: '#2f6a1f',
     leafHoles: 0.08,
+    door: 'solid',
+    trapdoor: 'solid',
   },
-  cherry: { planks: '#e6b8b0', bark: '#3b2027', rings: '#e9c2b8', leaves: '#f2a7cb' },
+  cherry: {
+    planks: '#e6b8b0',
+    bark: '#3b2027',
+    rings: '#e9c2b8',
+    leaves: '#f2a7cb',
+    door: 'porthole',
+    trapdoor: 'holes',
+  },
 };
 
 interface OreKind {
@@ -255,6 +293,43 @@ export function buildTextureSet(): TextureSet {
     def(`${name}_leaves`, ({ rng }) =>
       P.leaves(rng, ramp(w.leaves, 5, 0.3, 16), w.leafHoles ?? 0.16),
     );
+    def(`${name}_door_top`, ({ rng, get }) =>
+      door(rng, get(`${name}_planks`), plankPal, w.door, true),
+    );
+    def(`${name}_door_bottom`, ({ rng, get }) =>
+      door(rng, get(`${name}_planks`), plankPal, w.door, false),
+    );
+    def(`${name}_trapdoor`, ({ rng, get }) =>
+      trapdoor(rng, get(`${name}_planks`), plankPal, w.trapdoor),
+    );
+  }
+  const ironPal = [hex('#5a5a5e'), ...ramp('#c8c8cc', 5, 0.3)];
+  def('iron_door_top', ({ rng, get }) => door(rng, get('iron_block'), ironPal, 'grid', true));
+  def('iron_door_bottom', ({ rng, get }) => door(rng, get('iron_block'), ironPal, 'solid', false));
+  def('iron_trapdoor', ({ rng, get }) => trapdoor(rng, get('iron_block'), ironPal, 'grid'));
+  def('ladder', ({ rng }) => ladder(rng, [hex('#4a321c'), ...ramp('#8a643a', 4, 0.3)]));
+  def('lever', () => {
+    const t = new Tile();
+    const pal = ramp('#7a5634', 3, 0.3);
+    t.forEach((x, y) => t.set(x, y, x % 2 ? pal[0]! : pal[1]!));
+    for (let y = 0; y < 16; y += 5) for (let x = 0; x < 16; x++) t.set(x, y, pal[2]!);
+    return t;
+  });
+  def('glass_pane_top', () => {
+    const t = new Tile().fill(P.CLEAR);
+    for (let y = 0; y < 16; y++)
+      for (let x = 0; x < 16; x++) t.set(x, y, withAlpha(hex('#dcecf2'), 230));
+    return t;
+  });
+  def('chest_top', ({ rng, get }) => chestFace(rng, get('oak_planks'), 'top'));
+  def('chest_side', ({ rng, get }) => chestFace(rng, get('oak_planks'), 'side'));
+  def('chest_front', ({ rng, get }) => chestFace(rng, get('oak_planks'), 'front'));
+  def('glutstein_lamp', ({ rng }) => lamp(rng, false));
+  def('glutstein_lamp_on', ({ rng }) => lamp(rng, true));
+  for (const [color, hexColor] of Object.entries(DYE_COLORS)) {
+    def(`${color}_bed_top_head`, ({ rng }) => bedTop(rng, hexColor, true));
+    def(`${color}_bed_top_foot`, ({ rng }) => bedTop(rng, hexColor, false));
+    def(`${color}_bed_side`, ({ rng }) => bedSide(rng, hexColor));
   }
 
   // Ores and mineral blocks
@@ -349,6 +424,195 @@ export const DYE_COLORS: Record<string, string> = {
 };
 
 // ------------------------------------------------------- one-off drawings
+
+/** Door half: frame, panels and (for the top half) windows. */
+function door(
+  rng: Random,
+  base: Tile,
+  pal: readonly RGBA[],
+  style: WoodSpecies['door'],
+  top: boolean,
+): Tile {
+  const t = base.clone();
+  const dark = pal[0]!;
+  const light = pal[pal.length - 1]!;
+  // Outer frame.
+  for (let i = 0; i < 16; i++) {
+    t.set(0, i, dark);
+    t.set(15, i, dark);
+    if (top) t.set(i, 0, dark);
+    else t.set(i, 15, dark);
+    t.set(1, i, adjust(t.get(1, i), 0, 0, 0.06));
+  }
+  const clear = (x: number, y: number) => t.set(x, y, P.CLEAR);
+  const panel = (x0: number, y0: number, x1: number, y1: number) => {
+    for (let y = y0; y <= y1; y++)
+      for (let x = x0; x <= x1; x++) {
+        const edge = x === x0 || y === y0;
+        const shadow = x === x1 || y === y1;
+        t.set(x, y, edge ? dark : shadow ? light : shade(t.get(x, y), 0.9));
+      }
+  };
+  if (!top) {
+    if (style === 'slats')
+      for (let y = 2; y < 14; y += 3) for (let x = 3; x < 13; x++) t.set(x, y, dark);
+    else {
+      panel(3, 2, 7, 12);
+      panel(9, 2, 12, 12);
+    }
+    // Handle.
+    t.set(12, 2, hex('#2a2a2a'));
+    return t;
+  }
+  switch (style) {
+    case 'twin':
+      for (let y = 3; y <= 8; y++)
+        for (let x = 3; x <= 12; x++) if (x !== 7 && x !== 8) clear(x, y);
+      panel(3, 11, 12, 14);
+      break;
+    case 'grid':
+      for (let y = 2; y <= 13; y++)
+        for (let x = 2; x <= 13; x++) if (x % 4 !== 1 && y % 4 !== 1) clear(x, y);
+      break;
+    case 'porthole':
+      for (let y = 2; y <= 10; y++)
+        for (let x = 3; x <= 12; x++) if (Math.hypot(x - 7.5, y - 6) < 4) clear(x, y);
+      panel(3, 12, 12, 14);
+      break;
+    case 'slats':
+      for (let y = 2; y <= 13; y++) for (let x = 3; x <= 12; x++) if (y % 3 === 0) clear(x, y);
+      break;
+    default:
+      panel(3, 3, 12, 8);
+      panel(3, 10, 12, 14);
+      // A tiny peep hole.
+      clear(7, 5);
+      clear(8, 5);
+  }
+  void rng;
+  return t;
+}
+
+function trapdoor(
+  rng: Random,
+  base: Tile,
+  pal: readonly RGBA[],
+  style: WoodSpecies['trapdoor'],
+): Tile {
+  const t = base.clone();
+  const dark = pal[0]!;
+  for (let i = 0; i < 16; i++) {
+    t.set(i, 0, dark);
+    t.set(i, 15, dark);
+    t.set(0, i, dark);
+    t.set(15, i, dark);
+  }
+  if (style === 'holes') {
+    for (const [x0, y0] of [
+      [3, 3],
+      [9, 3],
+      [3, 9],
+      [9, 9],
+    ] as const)
+      for (let y = y0; y < y0 + 4; y++) for (let x = x0; x < x0 + 4; x++) t.set(x, y, P.CLEAR);
+  } else if (style === 'grid') {
+    for (let y = 2; y <= 13; y++)
+      for (let x = 2; x <= 13; x++) if (x % 3 !== 1 && y % 3 !== 1) t.set(x, y, P.CLEAR);
+  } else {
+    for (let i = 2; i < 14; i++) {
+      t.set(i, 7, dark);
+      t.set(i, 8, shade(dark, 1.3));
+    }
+  }
+  void rng;
+  return t;
+}
+
+function ladder(rng: Random, pal: readonly RGBA[]): Tile {
+  const t = new Tile().fill(P.CLEAR);
+  for (let y = 0; y < 16; y++) {
+    t.set(2, y, pal[2]!);
+    t.set(3, y, pal[1]!);
+    t.set(12, y, pal[2]!);
+    t.set(13, y, pal[1]!);
+  }
+  for (const y of [1, 5, 9, 13]) {
+    for (let x = 4; x < 12; x++) t.set(x, y, pal[3 + (rng.chance(0.3) ? 1 : 0)] ?? pal[3]!);
+    for (let x = 4; x < 12; x++) t.set(x, y + 1, pal[0]!);
+  }
+  return t;
+}
+
+function chestFace(rng: Random, planks: Tile, face: 'top' | 'side' | 'front'): Tile {
+  const t = planks.clone().map((_x, _y, c) => shade(c, 0.95));
+  const rim = hex('#3a2814');
+  for (let i = 0; i < 16; i++) {
+    t.set(i, 0, rim);
+    t.set(i, 15, rim);
+    t.set(0, i, rim);
+    t.set(15, i, rim);
+  }
+  if (face !== 'top') for (let x = 0; x < 16; x++) t.set(x, 5, rim);
+  if (face === 'front') {
+    const metal = [hex('#5a5a5e'), hex('#b8b8bc'), hex('#e0e0e4')];
+    for (let y = 4; y <= 8; y++)
+      for (let x = 7; x <= 8; x++) t.set(x, y, metal[y === 4 ? 2 : y === 8 ? 0 : 1]!);
+  }
+  void rng;
+  return t;
+}
+
+function lamp(rng: Random, on: boolean): Tile {
+  const frame = ramp('#6b4a2a', 3, 0.3);
+  const glass = on
+    ? [hex('#a8521c'), hex('#f0a040'), hex('#ffd87a'), hex('#fff3c8')]
+    : [hex('#3a2418'), hex('#5a3a26'), hex('#7a4e32'), hex('#8e6040')];
+  const t = P.cobble(rng, glass, 4);
+  for (let i = 0; i < 16; i++) {
+    for (const [x, y] of [
+      [i, 0],
+      [i, 15],
+      [0, i],
+      [15, i],
+    ] as const)
+      t.set(x, y, frame[1]!);
+    t.set(i, 1, frame[2]!);
+    t.set(1, i, frame[2]!);
+  }
+  return t;
+}
+
+function bedTop(rng: Random, color: string, head: boolean): Tile {
+  const t = wool(rng, color);
+  const frame = hex('#5a3e22');
+  for (let i = 0; i < 16; i++) {
+    t.set(0, i, frame);
+    t.set(15, i, frame);
+  }
+  if (head) {
+    // Pillow at the far (east = right) end: columns 10..14.
+    const pillow = ramp('#f0f0ec', 3, 0.12);
+    for (let y = 2; y <= 13; y++)
+      for (let x = 10; x <= 14; x++)
+        t.set(x, y, pillow[x === 10 || y === 13 ? 0 : y === 2 ? 2 : 1]!);
+  } else {
+    // Folded blanket edge.
+    for (let y = 1; y < 15; y++) t.set(2, y, shade(t.get(2, y), 0.75));
+  }
+  return t;
+}
+
+function bedSide(rng: Random, color: string): Tile {
+  const t = new Tile().fill(P.CLEAR);
+  const cloth = wool(rng, color);
+  const wood = ramp('#7a5634', 3, 0.3);
+  for (let y = 7; y < 16; y++)
+    for (let x = 0; x < 16; x++) {
+      if (y < 13) t.set(x, y, cloth.get(x, y));
+      else t.set(x, y, wood[y === 13 ? 2 : 1]!);
+    }
+  return t;
+}
 
 /** Tear-drop flame, brightest at the bottom center. */
 function flameSprite(colors: string[]): Tile {

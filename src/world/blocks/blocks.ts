@@ -3,7 +3,33 @@
  * Registration order defines numeric ids; saves store names, so reordering is safe.
  */
 import { rotationForFacing } from './models';
-import { BlockRegistry, type Box, type Props } from './registry';
+import { BlockRegistry, type Box, type Props, type TextureSpec } from './registry';
+import {
+  BED_COLLISION,
+  bedBoxes,
+  buttonBoxes,
+  chestBoxes,
+  doorBoxes,
+  fenceBoxes,
+  fenceCollision,
+  fenceConnect,
+  gateBoxes,
+  gateCollision,
+  HORIZONTAL as FACINGS,
+  ladderBoxes,
+  leverBoxes,
+  paneBoxes,
+  paneCollision,
+  paneConnect,
+  plateBoxes,
+  slabBoxes,
+  stairsBoxes,
+  stairsConnect,
+  trapdoorBoxes,
+  wallBoxes,
+  wallCollision,
+  wallConnect,
+} from './shapes';
 
 export const WOOD_TYPES = [
   'oak',
@@ -469,7 +495,263 @@ export function createBlockRegistry(): BlockRegistry {
     });
   }
 
+  registerShapedBlocks(r);
   return r.finalize();
+}
+
+/** Materials that get slabs and stairs: name prefix, textures, hardness, tool, sound. */
+const BUILDING_MATERIALS: [string, TextureSpec, number, 'pickaxe' | 'axe', 'stone' | 'wood'][] = [
+  ...WOOD_TYPES.map(
+    (w) => [w, `${w}_planks`, 2, 'axe', 'wood'] as [string, TextureSpec, number, 'axe', 'wood'],
+  ),
+  ['stone', 'stone', 1.5, 'pickaxe', 'stone'],
+  ['cobblestone', 'cobblestone', 2, 'pickaxe', 'stone'],
+  ['mossy_cobblestone', 'mossy_cobblestone', 2, 'pickaxe', 'stone'],
+  ['stone_brick', 'stone_bricks', 1.5, 'pickaxe', 'stone'],
+  ['brick', 'bricks', 2, 'pickaxe', 'stone'],
+  ['smooth_stone', 'smooth_stone', 2, 'pickaxe', 'stone'],
+  [
+    'sandstone',
+    { top: 'sandstone_top', bottom: 'sandstone_bottom', side: 'sandstone_side' },
+    0.8,
+    'pickaxe',
+    'stone',
+  ],
+  [
+    'red_sandstone',
+    { top: 'red_sandstone_top', bottom: 'red_sandstone_bottom', side: 'red_sandstone_side' },
+    0.8,
+    'pickaxe',
+    'stone',
+  ],
+];
+
+export const WALL_MATERIALS: [string, string][] = [
+  ['cobblestone', 'cobblestone'],
+  ['mossy_cobblestone', 'mossy_cobblestone'],
+  ['stone_brick', 'stone_bricks'],
+  ['brick', 'bricks'],
+  ['sandstone', 'sandstone_side'],
+];
+
+function registerShapedBlocks(r: BlockRegistry): void {
+  const faceTex = (t: TextureSpec) =>
+    typeof t === 'string'
+      ? t
+      : {
+          up: t.top ?? t.side ?? 'missing',
+          down: t.bottom ?? t.top ?? 'missing',
+          side: t.side ?? 'missing',
+        };
+
+  for (const [name, tex, hardness, tool, sound] of BUILDING_MATERIALS) {
+    r.register(`${name}_slab`, {
+      model: 'boxes',
+      properties: { type: ['bottom', 'top', 'double'] },
+      boxes: slabBoxes(faceTex(tex)),
+      lightSink: true,
+      hardness,
+      tool,
+      sound,
+    });
+    r.register(`${name}_stairs`, {
+      model: 'boxes',
+      properties: { facing: FACINGS, half: ['bottom', 'top'] },
+      boxes: stairsBoxes(faceTex(tex)),
+      connect: stairsConnect,
+      lightSink: true,
+      hardness,
+      tool,
+      sound,
+    });
+  }
+
+  for (const wood of WOOD_TYPES) {
+    const planks = `${wood}_planks`;
+    r.register(`${wood}_fence`, {
+      model: 'boxes',
+      boxes: fenceBoxes(planks),
+      connect: fenceConnect(),
+      collision: fenceCollision,
+      hardness: 2,
+      tool: 'axe',
+      sound: 'wood',
+      category: 'decoration',
+    });
+    r.register(`${wood}_fence_gate`, {
+      model: 'boxes',
+      properties: { facing: FACINGS, open: [false, true] },
+      boxes: gateBoxes(planks),
+      collision: gateCollision,
+      hardness: 2,
+      tool: 'axe',
+      sound: 'wood',
+      category: 'utility',
+    });
+    r.register(`${wood}_door`, {
+      model: 'boxes',
+      layer: 'cutout',
+      properties: {
+        facing: FACINGS,
+        half: ['lower', 'upper'],
+        open: [false, true],
+        hinge: ['left', 'right'],
+      },
+      boxes: doorBoxes(`${wood}_door_top`, `${wood}_door_bottom`),
+      hardness: 3,
+      tool: 'axe',
+      sound: 'wood',
+      category: 'utility',
+    });
+    r.register(`${wood}_trapdoor`, {
+      model: 'boxes',
+      layer: 'cutout',
+      properties: { facing: FACINGS, half: ['bottom', 'top'], open: [false, true] },
+      boxes: trapdoorBoxes(`${wood}_trapdoor`),
+      hardness: 3,
+      tool: 'axe',
+      sound: 'wood',
+      category: 'utility',
+    });
+  }
+  r.register('iron_door', {
+    model: 'boxes',
+    layer: 'cutout',
+    properties: {
+      facing: FACINGS,
+      half: ['lower', 'upper'],
+      open: [false, true],
+      hinge: ['left', 'right'],
+    },
+    boxes: doorBoxes('iron_door_top', 'iron_door_bottom'),
+    hardness: 5,
+    tool: 'pickaxe',
+    sound: 'metal',
+    category: 'utility',
+  });
+  r.register('iron_trapdoor', {
+    model: 'boxes',
+    layer: 'cutout',
+    properties: { facing: FACINGS, half: ['bottom', 'top'], open: [false, true] },
+    boxes: trapdoorBoxes('iron_trapdoor'),
+    hardness: 5,
+    tool: 'pickaxe',
+    sound: 'metal',
+    category: 'utility',
+  });
+
+  for (const [name, tex] of WALL_MATERIALS) {
+    r.register(`${name}_wall`, {
+      model: 'boxes',
+      boxes: wallBoxes(tex),
+      connect: wallConnect(),
+      collision: wallCollision,
+      hardness: 2,
+      tool: 'pickaxe',
+      sound: 'stone',
+      category: 'decoration',
+    });
+  }
+
+  r.register('glass_pane', {
+    model: 'boxes',
+    layer: 'cutout',
+    boxes: paneBoxes('glass', 'glass_pane_top'),
+    connect: paneConnect(),
+    collision: paneCollision,
+    hardness: 0.3,
+    sound: 'glass',
+    drops: null,
+    category: 'decoration',
+  });
+
+  r.register('ladder', {
+    model: 'boxes',
+    layer: 'cutout',
+    properties: { facing: FACINGS },
+    boxes: ladderBoxes('ladder'),
+    collision: (p) => {
+      const f = p.facing;
+      if (f === 'east') return [[0, 0, 0, 2, 16, 16]];
+      if (f === 'west') return [[14, 0, 0, 16, 16, 16]];
+      if (f === 'south') return [[0, 0, 0, 16, 16, 2]];
+      return [[0, 0, 14, 16, 16, 16]];
+    },
+    climbable: true,
+    hardness: 0.4,
+    tool: 'axe',
+    sound: 'wood',
+    category: 'utility',
+  });
+
+  r.register('lever', {
+    model: 'boxes',
+    properties: { face: ['wall', 'floor'], facing: FACINGS, powered: [false, true] },
+    boxes: leverBoxes('cobblestone', 'lever'),
+    solid: false,
+    hardness: 0.5,
+    sound: 'wood',
+    category: 'utility',
+  });
+  for (const [name, tex, sound] of [
+    ['stone_button', 'stone', 'stone'],
+    ['oak_button', 'oak_planks', 'wood'],
+  ] as const) {
+    r.register(name, {
+      model: 'boxes',
+      properties: { face: ['wall', 'floor'], facing: FACINGS, powered: [false, true] },
+      boxes: buttonBoxes(tex),
+      solid: false,
+      hardness: 0.5,
+      sound,
+      category: 'utility',
+    });
+  }
+  for (const [name, tex, sound] of [
+    ['stone_pressure_plate', 'stone', 'stone'],
+    ['oak_pressure_plate', 'oak_planks', 'wood'],
+  ] as const) {
+    r.register(name, {
+      model: 'boxes',
+      properties: { powered: [false, true] },
+      boxes: plateBoxes(tex),
+      solid: false,
+      hardness: 0.5,
+      sound,
+      category: 'utility',
+    });
+  }
+  r.register('glutstein_lamp', {
+    properties: { lit: [false, true] },
+    textures: (p) => (p.lit ? 'glutstein_lamp_on' : 'glutstein_lamp'),
+    lightEmission: (p) => (p.lit ? 15 : 0),
+    hardness: 0.3,
+    sound: 'glass',
+    category: 'utility',
+  });
+
+  r.register('chest', {
+    model: 'boxes',
+    properties: { facing: FACINGS },
+    boxes: chestBoxes('chest_top', 'chest_side', 'chest_front'),
+    collision: () => [[1, 0, 1, 15, 14, 15]],
+    hardness: 2.5,
+    tool: 'axe',
+    sound: 'wood',
+    category: 'utility',
+  });
+
+  for (const color of DYE_COLORS) {
+    r.register(`${color}_bed`, {
+      model: 'boxes',
+      properties: { facing: FACINGS, part: ['foot', 'head'] },
+      boxes: bedBoxes(color),
+      collision: () => BED_COLLISION,
+      hardness: 0.2,
+      sound: 'wool',
+      category: 'decoration',
+    });
+  }
 }
 
 /** The one registry used by the game (and by each worker, built identically). */

@@ -581,3 +581,46 @@ input[type='range'] {
   font-size: 22px;
   text-shadow: var(--shadow);
 }
+
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: 110px;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  font-size: 18px;
+  text-shadow: var(--shadow);
+  background: rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transition: opacity 0.25s;
+  white-space: nowrap;
+}
+
+.toast.visible {
+  opacity: 1;
+}
+
+.sleep-fade {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sleep-fade.active {
+  animation: sleep-fade 2.4s ease-in-out;
+}
+
+@keyframes sleep-fade {
+  0% {
+    opacity: 0;
+  }
+  45%,
+  55% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}

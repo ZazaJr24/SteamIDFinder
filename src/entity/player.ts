@@ -22,6 +22,8 @@ const SNEAK_SPEED = 1.3;
 const FLY_SPEED = 10.9;
 const FLY_SPRINT_SPEED = 21.6;
 const SWIM_SPEED = 2.2;
+const STEP_HEIGHT = 0.6;
+const CLIMB_SPEED = 2.4;
 
 export type GameMode = 'survival' | 'creative' | 'peaceful';
 
@@ -37,6 +39,11 @@ export interface WorldQuery extends BlockSource {
   getBlock(x: number, y: number, z: number): number;
 }
 
+/** Is there ground right under the box (within a hair)? */
+function collidesBelow(world: WorldQuery, box: Aabb): boolean {
+  return collides(world, { ...box, minY: box.minY - 0.02, maxY: box.minY });
+}
+
 export class Player {
   readonly position = new THREE.Vector3();
   readonly prevPosition = new THREE.Vector3();
@@ -46,6 +53,7 @@ export class Player {
   onGround = false;
   inWater = false;
   headInWater = false;
+  onLadder = false;
   flying = false;
   sneaking = false;
   sprinting = false;
@@ -151,16 +159,42 @@ export class Player {
     }
 
     let dx = this.velocity.x * dt;
-    const dy = this.velocity.y * dt;
+    let dy = this.velocity.y * dt;
     let dz = this.velocity.z * dt;
 
     // Sneaking: never walk off an edge.
     if (this.sneaking && this.onGround) [dx, dz] = this.clampToEdge(world, dx, dz);
 
+    // Ladders: climb while pushing into them or holding jump, hold on while sneaking.
+    if (this.onLadder && !this.flying) {
+      this.fallDistance = 0;
+      if (input.jump || (input.forward > 0 && this.horizontalCollision(world)))
+        this.velocity.y = CLIMB_SPEED;
+      else if (this.sneaking) this.velocity.y = 0;
+      else this.velocity.y = Math.max(this.velocity.y, -CLIMB_SPEED);
+      dy = this.velocity.y * dt;
+    }
+
     const box = this.box();
-    const [mx, my, mz] = moveBox(world, box, dx, dy, dz);
+    const start = { ...box };
+    let [mx, my, mz] = moveBox(world, box, dx, dy, dz);
+    // Step up onto slabs and stairs (like walking up a small ledge).
+    if (this.onGround && !this.flying && (mx !== dx || mz !== dz)) {
+      const stepped = { ...start };
+      const [, up] = moveBox(world, stepped, 0, STEP_HEIGHT, 0);
+      const [sx, , sz] = moveBox(world, stepped, dx, 0, dz);
+      const [, down] = moveBox(world, stepped, 0, -up, 0);
+      if (Math.hypot(sx, sz) > Math.hypot(mx, mz) + 1e-4) {
+        Object.assign(box, stepped);
+        mx = sx;
+        mz = sz;
+        my = up + down;
+      }
+    }
     const wasOnGround = this.onGround;
-    this.onGround = dy < 0 && my > dy + 1e-9;
+    this.onGround =
+      (dy < 0 && my > dy + 1e-9) ||
+      (wasOnGround && my >= 0 && dy <= 0 && collidesBelow(world, box));
     if (mx !== dx) this.velocity.x = 0;
     if (mz !== dz) this.velocity.z = 0;
     if (my !== dy) this.velocity.y = 0;
@@ -189,6 +223,9 @@ export class Player {
     const head = world.getBlock(Math.floor(p.x), Math.floor(p.y + this.eyeHeight), Math.floor(p.z));
     this.inWater = (BLOCKS.flags[feet]! & Flag.Liquid) !== 0;
     this.headInWater = (BLOCKS.flags[head]! & Flag.Liquid) !== 0;
+    const body = world.getBlock(Math.floor(p.x), Math.floor(p.y + 0.1), Math.floor(p.z));
+    const upper = world.getBlock(Math.floor(p.x), Math.floor(p.y + 1.1), Math.floor(p.z));
+    this.onLadder = ((BLOCKS.flags[body]! | BLOCKS.flags[upper]!) & Flag.Climbable) !== 0;
   }
 
   private horizontalCollision(world: WorldQuery): boolean {

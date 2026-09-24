@@ -6,6 +6,9 @@ export class Hud {
   private readonly crosshair: HTMLElement;
   private readonly fps: HTMLElement;
   private readonly debug: HTMLElement;
+  private readonly toastEl: HTMLElement;
+  private readonly fade: HTMLElement;
+  private toastTimer = 0;
   private frames = 0;
   private elapsed = 0;
   private lastFps = 0;
@@ -15,7 +18,17 @@ export class Hud {
     this.crosshair = h('div', { class: 'crosshair' });
     this.fps = h('div', { class: 'fps' });
     this.debug = h('pre', { class: 'debug' });
-    this.el = h('div', { class: 'hud-layer' }, this.crosshair, this.fps, this.debug);
+    this.toastEl = h('div', { class: 'toast' });
+    this.fade = h('div', { class: 'sleep-fade' });
+    this.el = h(
+      'div',
+      { class: 'hud-layer' },
+      this.fade,
+      this.crosshair,
+      this.fps,
+      this.debug,
+      this.toastEl,
+    );
     parent.append(this.el);
     this.setVisible(false);
   }
@@ -39,6 +52,24 @@ export class Hud {
       this.fps.textContent = `${this.lastFps} FPS`;
     }
     this.fps.style.display = showFps && !this.debugVisible ? 'block' : 'none';
+  }
+
+  /** Short message above the hotbar. */
+  toast(text: string, seconds = 3): void {
+    this.toastEl.textContent = text;
+    this.toastEl.classList.add('visible');
+    window.clearTimeout(this.toastTimer);
+    this.toastTimer = window.setTimeout(
+      () => this.toastEl.classList.remove('visible'),
+      seconds * 1000,
+    );
+  }
+
+  /** Fades the screen to black and back (sleeping). */
+  fadeOut(): void {
+    this.fade.classList.remove('active');
+    void this.fade.offsetWidth;
+    this.fade.classList.add('active');
   }
 
   setDebug(lines: string[] | null): void {

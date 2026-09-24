@@ -25,7 +25,7 @@ export class SelectionBox {
       this.object.visible = false;
       return;
     }
-    const s = BLOCKS.selection.subarray(hit.state * 6, hit.state * 6 + 6);
+    const s = BLOCKS.selectionOf(hit.state, hit.variant);
     const grow = 0.003;
     this.object.position.set(hit.x + s[0]! - grow, hit.y + s[1]! - grow, hit.z + s[2]! - grow);
     this.object.scale.set(

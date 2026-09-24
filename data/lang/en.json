@@ -54,5 +54,7 @@
   "world.deleteSure": "Sure?",
   "world.notPersistent": "Your browser blocks storage: worlds are kept only until you close this tab.",
   "world.seedHint": "random",
-  "hud.loadingWorld": "Loading world…"
+  "hud.loadingWorld": "Loading world…",
+  "bed.onlyNight": "You can only sleep at night. Spawn point set.",
+  "bed.goodMorning": "Good morning!"
 }
