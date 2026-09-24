@@ -1,0 +1,21 @@
+CubeCraft Legends - Testversion
+===============================
+
+Starten
+- Windows: Doppelklick auf start.bat. Das Spiel oeffnet sich im Browser
+  (http://localhost:8080). Das schwarze Fenster offen lassen - schliessen = beenden.
+- Mac/Linux: ./start.sh im Terminal (braucht Python 3).
+
+Steuerung (PC)
+- WASD laufen, Maus umsehen
+- Linksklick abbauen, Rechtsklick bauen / benutzen (Tueren, Klappen, Hebel, Betten)
+- Leertaste springen, 2x schnell = fliegen (Kreativ), Shift schleichen, Strg sprinten
+- E Block-Inventar, 1-9 / Mausrad Hotbar, Mittelklick Block aufnehmen
+- F3 Debug-Infos, Esc Pause
+- Tasten aendern: Einstellungen -> Steuerung
+
+Steuerung (Handy/Tablet)
+- Links ziehen = laufen, rechts wischen = umsehen
+- Kurz tippen = bauen/benutzen, gedrueckt halten = abbauen
+
+Fuer CrazyGames: den Inhalt des Ordners "game" hochladen.

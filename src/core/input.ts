@@ -167,6 +167,15 @@ export class Input {
     this.dy += dy;
   }
 
+  /** Applies custom primary keys; secondary defaults (arrow keys) stay. */
+  applyBindings(keys: Partial<Record<Action, string>>): void {
+    for (const action of Object.keys(DEFAULT_BINDINGS) as Action[]) {
+      const defaults = DEFAULT_BINDINGS[action];
+      const primary = keys[action] ?? defaults[0]!;
+      this.bindings[action] = [primary, ...defaults.slice(1).filter((c) => c !== primary)];
+    }
+  }
+
   get isPointerLocked(): boolean {
     return this.locked;
   }

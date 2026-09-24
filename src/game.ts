@@ -109,6 +109,7 @@ export class Game {
   private session: Session | null = null;
   private time = 0;
   private lastJumpPress = -1;
+  private touch: TouchControls | null = null;
 
   constructor(private readonly ctx: GameContext) {
     this.renderer = new THREE.WebGLRenderer({
@@ -126,7 +127,7 @@ export class Game {
     this.hud = new Hud(ctx.ui.hud);
     this.hotbar = new Hotbar(ctx.ui.hud);
     if (isMobileDevice()) {
-      new TouchControls(this.hud.el, ctx.input, {
+      this.touch = new TouchControls(this.hud.el, ctx.input, {
         pause: () => this.pause(),
         inventory: () => this.openInventory(),
       });
@@ -459,11 +460,14 @@ export class Game {
   private applySettings(s: Settings): void {
     const languageChanged = document.documentElement.lang !== s.language;
     setLanguage(s.language);
+    this.ctx.input.applyBindings(s.keys);
+    if (this.touch) this.touch.lookSpeed = 2.2 * s.touchSensitivity;
     if (languageChanged && this.currentScreen) this.ctx.ui.show(this.currentScreen());
     this.camera.fov = s.fov;
     this.camera.updateProjectionMatrix();
     const session = this.session;
     if (!session) return;
+    session.player.autoJump = s.autoJump;
     session.chunks.radius = s.renderDistance;
     this.camera.far = Math.max(s.renderDistance * 16 + 64, 420);
     this.camera.updateProjectionMatrix();

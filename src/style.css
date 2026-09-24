@@ -700,3 +700,21 @@ input[type='range'] {
 .touch-pause {
   left: 14px;
 }
+
+.hint {
+  margin: 0;
+  max-width: 520px;
+  color: var(--text-dim);
+}
+
+.key-btn {
+  min-width: 140px;
+}
+
+.key-btn.listening {
+  background: #7d6a2e;
+}
+
+.key-btn.conflict {
+  color: #ffb3aa;
+}

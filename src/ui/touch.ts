@@ -15,7 +15,6 @@ const STICK_RADIUS = 56;
 const TAP_TIME = 250;
 const HOLD_TIME = 350;
 const TAP_SLOP = 12;
-const LOOK_SPEED = 2.2;
 
 export class TouchControls {
   readonly el: HTMLElement;
@@ -32,6 +31,8 @@ export class TouchControls {
   private holdTimer = 0;
   private breaking = false;
   private sneaking = false;
+  /** Pixels of look movement per pixel of drag. */
+  lookSpeed = 2.2;
 
   constructor(
     parent: HTMLElement,
@@ -126,7 +127,7 @@ export class TouchControls {
       this.lookX = e.clientX;
       this.lookY = e.clientY;
       this.lookMoved += Math.abs(dx) + Math.abs(dy);
-      this.input.addLook(dx * LOOK_SPEED, dy * LOOK_SPEED);
+      this.input.addLook(dx * this.lookSpeed, dy * this.lookSpeed);
     }
   };
 

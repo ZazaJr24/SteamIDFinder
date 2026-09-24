@@ -1,4 +1,5 @@
 import type { KeyValueStore } from '../platform/crazygames';
+import { DEFAULT_BINDINGS, type Action } from './input';
 
 export type GraphicsQuality = 'low' | 'medium' | 'high';
 export type Language = 'en' | 'de';
@@ -17,6 +18,11 @@ export interface Settings {
   /** Lower render distance automatically when the frame rate drops. */
   autoQuality: boolean;
   viewBobbing: boolean;
+  /** Custom primary key per action (KeyboardEvent.code). */
+  keys: Partial<Record<Action, string>>;
+  touchSensitivity: number;
+  /** Jump up one-block steps automatically while walking. */
+  autoJump: boolean;
 }
 
 export const RENDER_DISTANCE_MIN = 2;
@@ -46,6 +52,9 @@ export function defaultSettings(mobile = isMobileDevice()): Settings {
     showFps: false,
     autoQuality: true,
     viewBobbing: true,
+    keys: {},
+    touchSensitivity: 1,
+    autoJump: mobile,
   };
 }
 
@@ -75,6 +84,16 @@ export function sanitizeSettings(raw: unknown, defaults: Settings): Settings {
   bool('showFps');
   bool('autoQuality');
   bool('viewBobbing');
+  bool('autoJump');
+  num('touchSensitivity', 0.3, 3);
+  if (r.keys && typeof r.keys === 'object') {
+    const keys: Partial<Record<Action, string>> = {};
+    for (const a of Object.keys(DEFAULT_BINDINGS) as Action[]) {
+      const v = (r.keys as Record<string, unknown>)[a];
+      if (typeof v === 'string' && /^[A-Za-z0-9]{1,24}$/.test(v)) keys[a] = v;
+    }
+    s.keys = keys;
+  }
   if (r.graphics === 'low' || r.graphics === 'medium' || r.graphics === 'high')
     s.graphics = r.graphics;
   if (r.language === 'en' || r.language === 'de') s.language = r.language;

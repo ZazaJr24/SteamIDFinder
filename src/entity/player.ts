@@ -54,6 +54,7 @@ export class Player {
   inWater = false;
   headInWater = false;
   onLadder = false;
+  autoJump = false;
   flying = false;
   sneaking = false;
   sprinting = false;
@@ -198,6 +199,22 @@ export class Player {
     if (mx !== dx) this.velocity.x = 0;
     if (mz !== dz) this.velocity.z = 0;
     if (my !== dy) this.velocity.y = 0;
+    // Auto-jump: walking into a one-block step jumps onto it.
+    if (
+      this.autoJump &&
+      this.onGround &&
+      !this.flying &&
+      !this.sneaking &&
+      input.forward > 0 &&
+      (mx !== dx || mz !== dz)
+    ) {
+      const probe = { ...box };
+      const [, up] = moveBox(world, probe, 0, 1.2, 0);
+      if (up > 1.1) {
+        const [sx, , sz] = moveBox(world, probe, dx * 2, 0, dz * 2);
+        if (Math.hypot(sx, sz) > Math.hypot(mx, mz) + 1e-3) this.velocity.y = JUMP_VELOCITY;
+      }
+    }
     this.position.set((box.minX + box.maxX) / 2, box.minY, (box.minZ + box.maxZ) / 2);
 
     if (this.onGround && this.flying) this.flying = false;

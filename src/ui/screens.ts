@@ -6,6 +6,7 @@ import {
   type SettingsStore,
 } from '../core/settings';
 import { button, h } from './dom';
+import { controlsScreen } from './controls';
 import { t, type TranslationKey } from './i18n';
 
 export class UIManager {
@@ -207,11 +208,23 @@ export function settingsScreen(store: SettingsStore, onBack: () => void): HTMLEl
   toggle('autoQuality', 'settings.autoQuality');
   toggle('showFps', 'settings.showFps');
 
-  return h(
+  const openControls = () => {
+    const controls: HTMLElement = controlsScreen(store, () =>
+      controls.replaceWith(settingsScreen(store, onBack)),
+    );
+    screen.replaceWith(controls);
+  };
+  const screen = h(
     'div',
     { class: 'screen settings-screen dim' },
     h('h2', { text: t('settings.title') }),
     body,
-    button(t('menu.back'), onBack, 'btn btn-primary'),
+    h(
+      'div',
+      { class: 'row-buttons' },
+      button(t('settings.controls'), openControls),
+      button(t('menu.back'), onBack, 'btn btn-primary'),
+    ),
   );
+  return screen;
 }
