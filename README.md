@@ -1,2 +1,0 @@
-# SteamIDFinder
-SteamIDFinder
